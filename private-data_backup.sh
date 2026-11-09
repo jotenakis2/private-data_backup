@@ -506,6 +506,16 @@ _config_validate() {
 		_ERR "NAS_TIMEOUT doit être un entier >= 1 (reçu : ${NAS_TIMEOUT})"
 		errs=1
 	fi
+	if [[ ${ENCRYPT} == "age" ]]; then
+		if [[ -z ${AGE_RECIPIENT} ]]; then
+			_ERR "ENCRYPT=age : AGE_RECIPIENT est vide"
+			errs=1
+		fi
+		if [[ -z ${AGE_IDENTITY} ]]; then
+			_ERR "ENCRYPT=age : AGE_IDENTITY est vide (clé privée pour vérifier/restaurer)"
+			errs=1
+		fi
+	fi
 	case "${LOG_FILES}" in
 	0|1) ;;
 	*)
@@ -845,11 +855,12 @@ _encrypt() {
 _decrypt() {
 	case "${1}" in
 	*.age|*.age.part)
-		if [[ -n ${AGE_IDENTITY} ]]; then
-			age --decrypt -i "${AGE_IDENTITY}" -- "${1}"
-		else
-			age --decrypt -- "${1}"
+		local ident="${AGE_IDENTITY}"
+		# Chemin absolu ou relatif à $HOME (comme les profils).
+		if [[ ${ident} != /* ]]; then
+			ident="${HOME}/${ident}"
 		fi
+		age --decrypt -i "${ident}" -- "${1}"
 		;;
 	*) cat -- "${1}" ;;
 	esac
@@ -2471,6 +2482,10 @@ main() {
 		_need age || return 1
 		if [[ -z ${AGE_RECIPIENT} ]]; then
 			_ERR "ENCRYPT=age mais AGE_RECIPIENT est vide"
+			return 2
+		fi
+		if [[ -z ${AGE_IDENTITY} ]]; then
+			_ERR "ENCRYPT=age mais AGE_IDENTITY est vide"
 			return 2
 		fi
 		;;

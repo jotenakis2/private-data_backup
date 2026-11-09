@@ -102,8 +102,8 @@ NAS_TIMEOUT="20"
 # ENCRYPT="age" : archives .tar.gz.age
 #   AGE_RECIPIENT : destinataire — clé age (age1...) ou clé SSH publique
 #                   (ligne « ssh-ed25519 AAAA... » de ~/.ssh/id_ed25519.pub)
-#   AGE_IDENTITY  : clé privée pour vérifier et restaurer
-#                   (.ssh/id_ed25519, keys.txt… ; vide = identité par défaut d'age)
+#   AGE_IDENTITY  : clé privée pour vérifier et restaurer (obligatoire)
+#                   chemin absolu ou relatif à $HOME : .ssh/id_ed25519, keys.txt…
 ENCRYPT=""
 AGE_RECIPIENT=""
 AGE_IDENTITY=""

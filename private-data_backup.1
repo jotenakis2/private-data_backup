@@ -244,7 +244,14 @@ active le chiffrement vers
 .B AGE_RECIPIENT
 (clé age ou clé SSH publique), et
 .B AGE_IDENTITY
-désigne la clé privée utilisée pour vérifier et restaurer. Les confirmations et le verrou ne peuvent être
+désigne la clé privée utilisée pour vérifier et restaurer (chemin absolu ou
+relatif au répertoire personnel) ; elle est obligatoire quand
+.BR ENCRYPT=age .
+.B age
+n'utilise pas
+.BR ssh-agent :
+une clé protégée par phrase de passe ne peut donc pas être déverrouillée par
+l'agent, la phrase est demandée à chaque déchiffrement interactif. Les confirmations et le verrou ne peuvent être
 contournés qu'explicitement
 .RB ( \-\-yes ).
 .SH "VOIR AUSSI"
