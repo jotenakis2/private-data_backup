@@ -1159,7 +1159,7 @@ Configuration Modifier la destination (montage et sous-dossier), la
               la liste des fichiers dans le journal et le délai NFS —
               mêmes garde-fous que pour les profils.
 
-Automatique   Programmer une sauvegarde par profil (timer systemd
+Planification Programmer une sauvegarde par profil (timer systemd
               utilisateur), lister, modifier, supprimer, lancer maintenant
               et activer le linger pour tourner hors session.
 
@@ -1366,7 +1366,7 @@ _menu() {
 		"${ICON_RESTORE}  Restaurer" \
 		"${ICON_ARCHIVE}  Archives" \
 		"${ICON_USERS}  Profils" \
-		"${ICON_CLOCK}  Automatique" \
+		"${ICON_CLOCK}  Planification" \
 		"${ICON_CONFIG}  Configuration" \
 		"${ICON_QUIT}  Quitter")" || return 1
 	# Correspondance par mot-clé : les icônes peuvent changer sans casser le menu.
@@ -1376,7 +1376,7 @@ _menu() {
 	*Restaurer*) _screen_restore ;;
 	*Archives*) _screen_archives ;;
 	*Profils*) _screen_profiles ;;
-	*Automatique*) _screen_timers ;;
+	*Planification*) _screen_timers ;;
 	*Configuration*) _screen_config ;;
 	*) return 1 ;;
 	esac
@@ -1403,7 +1403,7 @@ main() {
 		printf '  %-16s %s\n' ""              "cocher plusieurs archives), chiffrer les archives en clair,"
 		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
 		printf '  %-16s %s\n' "Profils"       "ajouter, modifier, retirer, adopter les orphelins, conflits"
-		printf '  %-16s %s\n' "Automatique"   "planifier des sauvegardes (timers systemd --user)"
+		printf '  %-16s %s\n' "Planification" "planifier des sauvegardes (timers systemd --user)"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
 		printf '  %-16s %s\n' "Description"   "présentation de l'outil"
 		printf '\nSécurité : vérification, instantanés, confirmations et verrou\n'

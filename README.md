@@ -70,7 +70,7 @@ private-data_backup.sh help | --version
 Interface texte :
 
 ```sh
-private-data_backup-tui.sh      # Description / Sauvegarder / Restaurer / Archives / Profils / Automatique / Configuration
+private-data_backup-tui.sh      # Description / Sauvegarder / Restaurer / Archives / Profils / Planification / Configuration
 ```
 
 Codes de sortie : `0` succès, `1` échec, `2` usage ou configuration invalide, `3` opération annulée.
@@ -101,7 +101,7 @@ private-data_backup.sh timer-linger
 
 `timer-list` affiche la fréquence, la prochaine exécution, l'état, le dernier
 résultat et rappelle l'état du linger. La TUI expose les mêmes actions dans
-l'écran **Automatique**.
+l'écran **Planification**.
 
 ## Configuration
 
