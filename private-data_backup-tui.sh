@@ -892,19 +892,19 @@ main() {
 
 	case "${1:-}" in
 	-h|--help)
-		cat <<EOF
-${0} — interface texte de private-data_backup.sh
-
-Sauvegarder, restaurer (archive ou instantané), agir sur les archives
-(vérifier, supprimer, rétention, purge des orphelins), gérer les profils
-(ajout, modification, retrait dans le fichier de configuration) et lire une
-description de l'outil.
-
-Toute la logique et les sécurités (vérification, instantané, confirmation,
-verrou) restent dans le script CLI.
-
-Dépendances : gum, ${CLI}
-EOF
+		printf '\nprivate-data_backup-tui %s — interface texte de private-data_backup\n' "${APP_VER}"
+		printf '\nUsage : private-data_backup-tui.sh [--help | --version]\n'
+		printf '\nÉcrans\n'
+		printf '  %-16s %s\n' "Sauvegarder"   "choisir des profils et lancer une sauvegarde"
+		printf '  %-16s %s\n' "Restaurer"     "restaurer la dernière archive, avec ou sans instantané"
+		printf '  %-16s %s\n' "Archives"      "voir, restaurer une version, vérifier, supprimer,"
+		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
+		printf '  %-16s %s\n' "Profils"       "ajouter, modifier ou retirer un profil"
+		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
+		printf '  %-16s %s\n' "Description"   "présentation de l'outil"
+		printf '\nSécurité : vérification, instantanés, confirmations et verrou\n'
+		printf 'restent gérés par le script CLI.\n'
+		printf '\nDépendances : gum, awk, et private-data_backup.sh (même dossier).\n\n'
 		return 0
 		;;
 	--version)

@@ -1,4 +1,4 @@
-# private-data-backup
+# private-data_backup
 
 Sauvegarde et restauration de données privées vers un stockage dédié (NAS,
 disque externe), par profils déclarés dans un fichier de configuration.

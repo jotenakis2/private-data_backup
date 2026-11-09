@@ -1,5 +1,5 @@
 # =============================================================================
-# private-data-backup — installation
+# private-data_backup — installation
 #
 #   make check        vérifie la syntaxe, shellcheck, la configuration et le manuel
 #   make install      installe les scripts et la configuration
@@ -44,7 +44,7 @@ all: check
 
 help:
 	@printf '\n'
-	@printf 'private-data-backup — cibles disponibles\n\n'
+	@printf 'private-data_backup — cibles disponibles\n\n'
 	@printf '  make check       syntaxe + shellcheck + validation de la configuration\n'
 	@printf '  make install     scripts dans %s, configuration dans %s, manuel dans %s\n' \
 		'$(DESTDIR)$(BINDIR)' '$(DESTDIR)$(CONFDIR)' '$(DESTDIR)$(MANDIR)/man1'
