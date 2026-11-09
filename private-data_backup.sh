@@ -102,6 +102,8 @@ ORPHANS=0
 PURGE_ORPHANS=0
 PORCELAIN=0
 ARCHIVE_FILE=""
+PLAN_FILE=""
+APPLY_PLAN=""
 SNAPSHOT_MODE="auto"
 
 # Archives découvertes : triées par groupe puis date décroissante.
@@ -1170,6 +1172,8 @@ _usage() {
 --porcelain|sortie tabulée (interfaces) pour show et list
 --archive FILE|restaurer cette archive précise (avec restore)
 --config FILE|utiliser ce fichier de configuration
+--plan FILE|écrire le plan d'adoption dans FILE (adopt-orphans)
+--apply-plan FILE|appliquer ce plan sans réanalyser les archives
 --delete-logs|supprimer les journaux (action seule, avec --dry-run/--yes)
 OPTS
 
@@ -2271,8 +2275,33 @@ adopt_orphans() {
 	local -A filtre=() vu=()
 	local i group src tmp="" rc=0
 
-	_check_nas || return 1
-	_collect_archives
+	# Application d'un plan préparé : aucune relecture des archives.
+	if [[ -n ${APPLY_PLAN} ]]; then
+		if [[ ! -r ${APPLY_PLAN} ]]; then
+			_ERR "plan illisible : ${APPLY_PLAN}"
+			return 2
+		fi
+		while IFS=$'\t' read -r i src; do
+			[[ -n ${i} ]] || continue
+			if [[ -z ${src} ]] || [[ ${src} == /* ]]; then
+				_ERR "plan invalide : dossier manquant ou absolu pour ${i}"
+				return 2
+			fi
+			if _known_profile "${i}"; then
+				_ERR "déjà dans la configuration : ${i}"
+				return 2
+			fi
+			noms+=("${i}")
+			sources+=("${src}")
+		done <"${APPLY_PLAN}"
+		if ((${#noms[@]} == 0)); then
+			_INFO "plan vide — rien à adopter"
+			return 0
+		fi
+	else
+		_check_nas || return 1
+		_collect_archives
+	fi
 
 	for i in "${filtres[@]}"; do
 		i="${i^^}"
@@ -2284,6 +2313,7 @@ adopt_orphans() {
 	done
 
 	# Un candidat par profil orphelin : son archive la plus récente.
+	if [[ -z ${APPLY_PLAN} ]]; then
 	for i in "${!ARCH_GROUP[@]}"; do
 		group="${ARCH_GROUP[${i}]}"
 		[[ ${group} == "${SNAPSHOT_SUBDIR}/"* ]] && continue
@@ -2308,6 +2338,18 @@ adopt_orphans() {
 		noms+=("${group}")
 		sources+=("${src}")
 	done
+	fi
+
+	# Écriture du plan si demandée (permet d'appliquer sans réanalyser).
+	if [[ -n ${PLAN_FILE} ]]; then
+		: >"${PLAN_FILE}" || {
+			_ERR "impossible d'écrire le plan : ${PLAN_FILE}"
+			return 1
+		}
+		for i in "${!noms[@]}"; do
+			printf '%s\t%s\n' "${noms[${i}]}" "${sources[${i}]}" >>"${PLAN_FILE}"
+		done
+	fi
 
 	if ((${#noms[@]} == 0)); then
 		_INFO "aucun profil orphelin à adopter"
@@ -2742,6 +2784,10 @@ main() {
 		--delete-logs)   DELETE_LOGS=1 ;;
 		--porcelain)     PORCELAIN=1 ;;
 		--archive)       shift; ARCHIVE_FILE="${1:-}" ;;
+		--plan)          shift; PLAN_FILE="${1:-}" ;;
+		--plan=*)        PLAN_FILE="${1#*=}" ;;
+		--apply-plan)    shift; APPLY_PLAN="${1:-}" ;;
+		--apply-plan=*)  APPLY_PLAN="${1#*=}" ;;
 		--archive=*)     ARCHIVE_FILE="${1#*=}" ;;
 		--config)        shift ;;
 		--config=*)      ;;

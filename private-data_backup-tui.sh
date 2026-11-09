@@ -775,14 +775,24 @@ _profile_edit() {
 }
 
 _profile_adopt() {
+	local tmp=""
+	tmp="$(mktemp)" || return 0
 	printf '\n'
-	"${CLI}" adopt-orphans --dry-run
+	# Une seule analyse : le plan est mis en cache puis appliqué tel quel.
+	"${CLI}" adopt-orphans --dry-run --plan "${tmp}"
+	if [[ ! -s ${tmp} ]]; then
+		rm -f -- "${tmp}"
+		_pause
+		return 0
+	fi
 	if ! gum confirm --default=false --affirmative "Adopter" --negative "Annuler" \
 		"Ajouter ces profils orphelins à la configuration ?"; then
+		rm -f -- "${tmp}"
 		return 0
 	fi
 	printf '\n'
-	"${CLI}" adopt-orphans --yes
+	"${CLI}" adopt-orphans --yes --apply-plan "${tmp}"
+	rm -f -- "${tmp}"
 	_pause
 	return 0
 }

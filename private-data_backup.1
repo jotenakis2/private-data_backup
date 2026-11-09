@@ -150,6 +150,15 @@ Restaurer cette archive précise (avec
 .TP
 .BI \-\-config " FICHIER"
 Utiliser ce fichier de configuration.
+.TP
+.BI \-\-plan " FICHIER"
+Écrire le plan d'adoption dans FICHIER (avec
+.BR adopt-orphans ),
+afin de l'appliquer ensuite sans réanalyser les archives.
+.TP
+.BI \-\-apply\-plan " FICHIER"
+Appliquer un plan préparé par
+.BR \-\-plan .
 .SH CONFIGURATION
 Fichier bash chargé dans cet ordre :
 .IP "1." 4
