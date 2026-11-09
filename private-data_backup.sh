@@ -506,15 +506,9 @@ _config_validate() {
 		_ERR "NAS_TIMEOUT doit être un entier >= 1 (reçu : ${NAS_TIMEOUT})"
 		errs=1
 	fi
-	if [[ ${ENCRYPT} == "age" ]]; then
-		if [[ -z ${AGE_RECIPIENT} ]]; then
-			_ERR "ENCRYPT=age : AGE_RECIPIENT est vide"
-			errs=1
-		fi
-		if [[ -z ${AGE_IDENTITY} ]]; then
-			_ERR "ENCRYPT=age : AGE_IDENTITY est vide (clé privée pour vérifier/restaurer)"
-			errs=1
-		fi
+	if [[ ${ENCRYPT} == "age" ]] && [[ -z ${AGE_IDENTITY} ]]; then
+		_ERR "ENCRYPT=age : AGE_IDENTITY est vide (clé privée pour vérifier/restaurer)"
+		errs=1
 	fi
 	case "${LOG_FILES}" in
 	0|1) ;;
@@ -843,6 +837,32 @@ _archive_is_encrypted() {
 	*.age|*.age.part) return 0 ;;
 	*) return 1 ;;
 	esac
+}
+
+# Renseigne AGE_RECIPIENT à partir de AGE_IDENTITY si besoin : la clé publique
+# est déduite de la clé privée (age-keygen -y, ou ssh-keygen -y pour une clé SSH).
+_age_recipient() {
+	[[ -n ${AGE_RECIPIENT} ]] && return 0
+	local ident="${AGE_IDENTITY}" pub=""
+	if [[ -z ${ident} ]]; then
+		_ERR "AGE_IDENTITY est vide : impossible de déduire le destinataire"
+		return 1
+	fi
+	if [[ ${ident} != /* ]]; then
+		ident="${HOME}/${ident}"
+	fi
+	if pub="$(age-keygen -y "${ident}" 2>/dev/null)"; then
+		AGE_RECIPIENT="${pub}"
+		_log "destinataire déduit de ${ident} (clé age)"
+		return 0
+	fi
+	if pub="$(ssh-keygen -y -P '' -f "${ident}" 2>/dev/null)"; then
+		AGE_RECIPIENT="${pub}"
+		_log "destinataire déduit de ${ident} (clé SSH)"
+		return 0
+	fi
+	_ERR "impossible de déduire la clé publique de ${ident} — définis AGE_RECIPIENT"
+	return 1
 }
 
 _encrypt() {
@@ -1280,17 +1300,18 @@ list() {
 	fi
 
 	filter="${filter^^}"
-	local d_prof d_when d_size d_file
+	local d_prof d_when d_size d_file d_enc
 	d_prof="$(_dashes 26)"
 	d_when="$(_dashes 19)"
 	d_size="$(_dashes 10)"
 	d_file="$(_dashes 10)"
+	d_enc="$(_dashes 6)"
 
 	# La première colonne marque les profils hors configuration d'une « * ».
-	printf '\n  %-26s  %-19s  %10s  %s\n' "Profil" "Date" "Taille" "Fichier"
-	printf '  %s  %s  %s  %s\n' "${d_prof}" "${d_when}" "${d_size}" "${d_file}"
+	printf '\n  %-26s  %-19s  %10s  %-6s  %s\n' "Profil" "Date" "Taille" "Chiffr." "Fichier"
+	printf '  %s  %s  %s  %s  %s\n' "${d_prof}" "${d_when}" "${d_size}" "${d_enc}" "${d_file}"
 
-	local i group label when size_h profil_group skipped=0 orphans=0 mark=""
+	local i group label when size_h profil_group enc skipped=0 orphans=0 mark=""
 	for i in "${!ARCH_PATH[@]}"; do
 		group="${ARCH_GROUP[${i}]}"
 		profil_group="$(_group_profile "${group}")"
@@ -1307,8 +1328,12 @@ list() {
 			mark="*"
 			orphans=$((orphans + 1))
 		fi
-		printf '%s %-26s  %-19s  %10s  %s\n' \
-			"${mark}" "${label}" "${when}" "${size_h}" "${ARCH_PATH[${i}]##*/}"
+		case "${ARCH_PATH[${i}]}" in
+		*.age) enc="age" ;;
+		*) enc="-" ;;
+		esac
+		printf '%s %-26s  %-19s  %10s  %-6s  %s\n' \
+			"${mark}" "${label}" "${when}" "${size_h}" "${enc}" "${ARCH_PATH[${i}]##*/}"
 	done
 	printf '\n'
 	if ((orphans > 0)); then
@@ -2480,10 +2505,6 @@ main() {
 	"") ;;
 	age)
 		_need age || return 1
-		if [[ -z ${AGE_RECIPIENT} ]]; then
-			_ERR "ENCRYPT=age mais AGE_RECIPIENT est vide"
-			return 2
-		fi
 		if [[ -z ${AGE_IDENTITY} ]]; then
 			_ERR "ENCRYPT=age mais AGE_IDENTITY est vide"
 			return 2
@@ -2503,6 +2524,11 @@ main() {
 
 	_enable_colors
 	_init_log
+
+	# Clé publique déduite de la clé privée (journalisée).
+	if [[ ${ENCRYPT} == "age" ]]; then
+		_age_recipient || return 1
+	fi
 
 	# Les commandes de consultation (`show`, `list`, `config-path`…) sont
 	# appelées en boucle par la TUI : elles ne créent pas de journal.

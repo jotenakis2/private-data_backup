@@ -812,9 +812,8 @@ _config_encrypt() {
 		_config_apply "ENCRYPT=" "AGE_RECIPIENT=" "AGE_IDENTITY="
 		;;
 	age)
-		rec="$(gum input --header "Destinataire : clé age1… ou clé SSH publique (ssh-ed25519 AAAA…)" \
+		rec="$(gum input --header "Destinataire (optionnel : déduit de la clé privée si vide)" \
 			--value "${CFG_AGE}")" || return 0
-		[[ -n ${rec} ]] || return 0
 		id="$(gum input --header "Clé privée pour restaurer (.ssh/id_ed25519, keys.txt…)" \
 			--value "${CFG_AGE_ID}")" || return 0
 		[[ -n ${id} ]] || return 0

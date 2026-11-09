@@ -67,6 +67,7 @@ SERVICES=(
 # Projects/rustTV/target mais pas Projects/mon-target).
 # >>> EXCLUDES
 EXCLUDES=(
+	["SSH"]="id_ed25519_backup|id_ed25519_backup.pub"
 	["BRAVE"]="Cache|Code Cache|GPUCache|Service Worker|ScriptCache|ShaderCache|GrShaderCache|DawnCache|Crashpad|extensions_crx_cache|component_crx_cache|adblock_cache|SingletonLock|SingletonCookie|SingletonSocket"
 	["PROJECTS"]="target|node_modules|__pycache__|.venv|venv|.mypy_cache|.pytest_cache|.ruff_cache"
 )
@@ -100,8 +101,8 @@ NAS_TIMEOUT="20"
 # -----------------------------------------------------------------------------
 # ENCRYPT=""    : archives .tar.gz en clair
 # ENCRYPT="age" : archives .tar.gz.age
-#   AGE_RECIPIENT : destinataire — clé age (age1...) ou clé SSH publique
-#                   (ligne « ssh-ed25519 AAAA... » de ~/.ssh/id_ed25519.pub)
+#   AGE_RECIPIENT : destinataire — optionnel, déduit de AGE_IDENTITY si vide
+#                   (clé age1... ou clé SSH publique ssh-ed25519 AAAA...)
 #   AGE_IDENTITY  : clé privée pour vérifier et restaurer (obligatoire)
 #                   chemin absolu ou relatif à $HOME : .ssh/id_ed25519, keys.txt…
 ENCRYPT=""

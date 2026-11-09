@@ -240,13 +240,17 @@ Archives et journaux en 0600, dossiers en 0700
 Le chiffrement des archives est optionnel et repose sur
 .BR age :
 .B ENCRYPT=age
-active le chiffrement vers
-.B AGE_RECIPIENT
-(clé age ou clé SSH publique), et
+active le chiffrement.
 .B AGE_IDENTITY
-désigne la clé privée utilisée pour vérifier et restaurer (chemin absolu ou
-relatif au répertoire personnel) ; elle est obligatoire quand
-.BR ENCRYPT=age .
+désigne la clé privée (chemin absolu ou relatif au répertoire personnel), est
+obligatoire quand
+.BR ENCRYPT=age ,
+et sert à vérifier et restaurer.
+.B AGE_RECIPIENT
+est le destinataire (clé age ou clé SSH publique) ; il est optionnel : s'il
+est vide, la clé publique est déduite de
+.BR AGE_IDENTITY ,
+ce qui permet de ne configurer qu'une seule clé.
 .B age
 n'utilise pas
 .BR ssh-agent :
