@@ -1094,7 +1094,7 @@ _usage() {
 	done <<OPTS
 --dry-run|n'écrit et n'efface rien : affiche ce qui serait fait
 --yes, -y|ne pas demander de confirmation
---no-verify|ne pas vérifier l'intégrité des archives (backup, delete_old)
+--no-verify|ne pas vérifier l'intégrité (backup, delete_old, encrypt-archives)
 --keep N|archives conservées par profil (delete_old, défaut ${KEEP_DEFAULT})
 --orphans|inclure les profils hors configuration dans la rétention (delete_old)
 --purge-orphans|supprimer toutes les archives des profils hors configuration
@@ -1459,7 +1459,7 @@ _backup_one() {
 
 	if ((VERIFY == 1)); then
 		local vrc=0
-		_verify_archive "${part}"
+		_RUN "Vérification de ${part##*/}" _verify_archive "${part}"
 		vrc=$?
 		case "${vrc}" in
 		0) _log "profil ${profil} : vérification OK" ;;
@@ -1676,7 +1676,7 @@ _snapshot_before_restore() {
 	fi
 
 	if ((VERIFY == 1)); then
-		_verify_archive "${target}"
+		_RUN "Vérification de l'instantané ${target##*/}" _verify_archive "${target}"
 		rc=$?
 		case "${rc}" in
 		0) ;;
@@ -1737,7 +1737,7 @@ _pick_archive() {
 	fi
 	RESTORE_FILE="${LATEST_PATH}"
 
-	_verify_archive "${RESTORE_FILE}"
+	_RUN "Vérification de ${RESTORE_FILE##*/}" _verify_archive "${RESTORE_FILE}"
 	rc=$?
 	if ((rc == 1)); then
 		_WARN "${profil} : ${RESTORE_FILE##*/} est corrompue — recherche d'une archive antérieure valide"
@@ -1775,7 +1775,7 @@ _restore_file() {
 		"${C_BOLD}" "${label}" "${C_RESET}" "${profil}" "${file##*/}" "${when}" "${size_h}"
 
 	if ((verified == 0)); then
-		_verify_archive "${file}"
+		_RUN "Vérification de ${file##*/}" _verify_archive "${file}"
 		rc=$?
 		_log "${label} ${profil} : vérification rc=${rc}"
 		if ((rc == 1)); then
@@ -2042,7 +2042,7 @@ verify() {
 	if ((LOG_FILES == 1)); then
 		_log "--- contenu de ${f##*/} ---"
 	fi
-	_verify_archive "${f}" 1
+	_RUN "Vérification de ${f##*/}" _verify_archive "${f}" 1
 	rc=$?
 	if ((LOG_FILES == 1)); then
 		_log "--- fin du contenu ---"
@@ -2350,11 +2350,13 @@ encrypt_archives() {
 			rc=1
 			continue
 		fi
-		if ! _verify_archive "${part}"; then
-			_cleanup_parts
-			_ERR "${f##*/} : archive chiffrée invalide — original conservé"
-			rc=1
-			continue
+		if ((VERIFY == 1)); then
+			if ! _RUN "Vérification de ${part##*/}" _verify_archive "${part}"; then
+				_cleanup_parts
+				_ERR "${f##*/} : archive chiffrée invalide — original conservé"
+				rc=1
+				continue
+			fi
 		fi
 		chmod 600 -- "${part}" 2>/dev/null
 		PART_FILE=""
