@@ -971,23 +971,32 @@ Usage :
   ${C_GREEN}${0} help | --version
 
 Options :
-  --dry-run      n'écrit et n'efface rien : affiche ce qui serait fait
-  --yes, -y      ne pas demander de confirmation
-  --no-verify    ne pas vérifier l'intégrité des archives (backup, delete_old)
-  --keep N       archives conservées par profil (delete_old, défaut ${KEEP_DEFAULT})
-  --orphans      inclure les profils hors configuration dans la rétention (delete_old)
-  --purge-orphans supprimer toutes les archives des profils hors configuration
-  --snapshot     forcer l'instantané avant restauration
-  --no-snapshot  interdire l'instantané avant restauration
-  --porcelain    sortie tabulée (interfaces) pour show et list
-  --archive FILE restaurer cette archive précise (avec restore)
-  --config FILE  fichier de configuration (défaut : ./${CONFIG_BASENAME}
-                 ou ${XDG_CONFIG_HOME:-${HOME}/.config}/${SCRIPTNAME}/config)
-
-Configuration : ${CFG_FILE:-aucune (charge les valeurs par défaut)}
-Stockage      : ${NAS_MOUNT:-${NAS}/${BACKUP_SUBDIR}}
-Secrets  : archives et logs 0600, dossiers 0700 (umask 077)
 EOF
+	local opt desc
+	while IFS='|' read -r opt desc; do
+		[[ -n ${opt} ]] || continue
+		printf '  %-16s %s\n' "${opt}" "${desc}"
+	done <<OPTS
+--dry-run|n'écrit et n'efface rien : affiche ce qui serait fait
+--yes, -y|ne pas demander de confirmation
+--no-verify|ne pas vérifier l'intégrité des archives (backup, delete_old)
+--keep N|archives conservées par profil (delete_old, défaut ${KEEP_DEFAULT})
+--orphans|inclure les profils hors configuration dans la rétention (delete_old)
+--purge-orphans|supprimer toutes les archives des profils hors configuration
+--snapshot|forcer l'instantané avant restauration
+--no-snapshot|interdire l'instantané avant restauration
+--porcelain|sortie tabulée (interfaces) pour show et list
+--archive FILE|restaurer cette archive précise (avec restore)
+--config FILE|utiliser ce fichier de configuration
+OPTS
+
+	local conf_affichee="${CFG_FILE}"
+	if [[ -z ${conf_affichee} ]]; then
+		conf_affichee="aucune (défaut : ${XDG_CONFIG_HOME:-${HOME}/.config}/${SCRIPTNAME}/config)"
+	fi
+	printf '\n%-13s : %s\n' "Configuration" "${conf_affichee}"
+	printf '%-13s : %s\n' "Stockage" "${NAS_MOUNT:-${NAS}/${BACKUP_SUBDIR}}"
+	printf '%-13s : %s\n' "Secrets" "archives et logs 0600, dossiers 0700 (umask 077)"
 	return 0
 }
 
@@ -2508,8 +2517,10 @@ main() {
 
 _enable_colors
 
+_cfg_required=0
 _cfg_loaded=0
 if _cfg_needed "${@}"; then
+	_cfg_required=1
 	CFG_FILE="$(_config_path "${@}")"
 	_cfg_rc=$?
 	if ((_cfg_rc != 0)); then
@@ -2536,11 +2547,22 @@ if _cfg_needed "${@}"; then
 		exit 2
 	fi
 	_cfg_loaded=1
+else
+	# `help`/`--version` : configuration optionnelle, chargée si possible pour
+	# afficher les vraies valeurs (aucune erreur bloquante).
+	CFG_FILE="$(_config_path "${@}" 2>/dev/null)" || CFG_FILE=""
+	if [[ -n ${CFG_FILE} ]] && [[ -r ${CFG_FILE} ]]; then
+		set +u
+		# shellcheck source=/dev/null
+		source "${CFG_FILE}" >/dev/null 2>&1 || true
+		set -u
+		_cfg_loaded=1
+	fi
 fi
 
 _config_defaults
 
-if ((_cfg_loaded == 1)); then
+if ((_cfg_required == 1)); then
 	_config_validate || exit 2
 fi
 
