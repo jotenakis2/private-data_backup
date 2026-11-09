@@ -833,12 +833,12 @@ _screen_config() {
 			"délai NFS    : ${CFG_TIMEOUT} s"
 
 		action="$(gum choose --header "${ICON_CONFIG}  Configuration — que modifier ?" --cursor "❯ " \
-			"Destination (montage, sous-dossier)…" \
-			"Rétention et vérification…" \
-			"Instantanés avant restauration…" \
-			"Chiffrement…" \
-			"Journalisation (liste des fichiers)…" \
-			"Délai NFS…" \
+			"Destination (montage, sous-dossier)" \
+			"Rétention et vérification" \
+			"Instantanés avant restauration" \
+			"Chiffrement" \
+			"Journalisation (liste des fichiers)" \
+			"Délai NFS" \
 			"Retour")" || return 0
 		case "${action}" in
 		Destination*) _config_destination ;;
