@@ -1,2 +1,3 @@
 *.bak
 *.part
+private_data_backup.conf

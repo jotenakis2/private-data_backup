@@ -33,7 +33,7 @@ FORCE           ?= 0
 PURGE           ?= 0
 
 SCRIPTS   := private-data_backup.sh private-data_backup-tui.sh
-CONF      := private_data_backup.conf
+CONF      := private_data_backup.conf.example
 CONF_DEST := $(CONFDIR)/config
 
 .PHONY: all help check install install-scripts install-config reinstall uninstall

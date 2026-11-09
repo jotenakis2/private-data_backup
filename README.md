@@ -67,7 +67,7 @@ Fichier bash, chargé dans cet ordre :
 3. `private_data_backup.conf` à côté du script (liens résolus)
 4. `${XDG_CONFIG_HOME:-$HOME/.config}/private-data_backup/config`
 
-Le fichier livré (`private_data_backup.conf`) sert de modèle : profils
+Le fichier livré (`private_data_backup.conf.example`) sert de modèle : profils
 (`SOURCES`), binaires surveillés (`COMMANDS`), services (`SERVICES`),
 exclusions (`EXCLUDES`), stockage, rétention, instantanés, journalisation,
 chiffrement. Les blocs `# >>> NOM` / `# <<< NOM` sont réécrits par
