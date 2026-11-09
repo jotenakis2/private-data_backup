@@ -916,6 +916,7 @@ EOF
 
 	[[ -t 0 ]] && [[ -t 1 ]] || _die "cette interface nécessite un terminal interactif"
 	command -v gum >/dev/null 2>&1 || _die "gum est requis (pacman -S gum)"
+	command -v awk >/dev/null 2>&1 || _die "awk est requis (paquet gawk ou mawk)"
 	[[ -x ${CLI} ]] || _die "script principal introuvable : ${CLI}"
 
 	local err=""

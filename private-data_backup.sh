@@ -93,6 +93,7 @@ NAS_MOUNT=""
 FAILURES=0
 INTERRUPTED=0
 LOG_RUN=0
+needs_lock=0
 
 DRY_RUN=0
 ASSUME_YES=0
@@ -2347,7 +2348,11 @@ main() {
 	# `config-path` sert aux scripts : sortie pure (bannière/log sur stderr).
 	[[ ${cmd} == "config-path" ]] && PORCELAIN=1
 
-	_need tar find sort awk stat findmnt date timeout du || return 1
+	_need tar find sort awk stat findmnt date timeout du df pgrep readlink || return 1
+	# systemctl n'est nécessaire que si un profil déclare un service.
+	if ((${#SERVICES[@]} > 0)); then
+		_need systemctl || return 1
+	fi
 	case "${ENCRYPT}" in
 	"") ;;
 	gpg)
@@ -2401,7 +2406,13 @@ main() {
 	# Verrou : une seule instance mutante à la fois (deux backups simultanés
 	# pourraient produire deux archives concurrentes, et delete_old pourrait
 	# supprimer une archive en cours d'écriture).
-	if [[ ${cmd} == "backup" ]] || [[ ${cmd} == "restore" ]] || [[ ${cmd} == "delete_old" ]]; then
+	case "${cmd}" in
+	backup|restore|rollback|delete_old|delete-archive|profile-add|profile-remove|config-set)
+		needs_lock=1
+		;;
+	*) needs_lock=0 ;;
+	esac
+	if ((needs_lock == 1)); then
 		_need flock || return 1
 		local lock_file="${XDG_RUNTIME_DIR:-/tmp}/${SCRIPTNAME}.${UID}.lock"
 		if ! exec 9>"${lock_file}"; then

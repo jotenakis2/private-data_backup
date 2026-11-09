@@ -76,5 +76,16 @@ en dehors.
 
 ## Prérequis
 
-`bash`, `tar`, `findmnt`, `fd`/`find`, `awk`, `flock`, `gpg` (si chiffrement),
-et `gum` pour la TUI.
+**Obligatoires** — vérifiés au démarrage, tous les manquants sont signalés
+d'un coup (code retour 1) : `bash`, `tar`, `find`, `sort`, `awk`, `stat`,
+`findmnt`, `flock` (util-linux), `date`, `timeout`, `du`, `df`, `readlink`
+(coreutils), `pgrep` (procps-ng).
+
+**Conditionnels** :
+
+| Outil | Requis quand |
+|---|---|
+| `systemctl` | un profil déclare un service (`SERVICES`) |
+| `gpg` / `age` | le chiffrement est activé (`ENCRYPT`) |
+| `gum` | lancement de l'interface texte |
+| `awk` | interface texte (mise en forme des tailles) |
