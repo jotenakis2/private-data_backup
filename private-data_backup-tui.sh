@@ -70,6 +70,48 @@ PF_EXCL=""
 # UTILITAIRES
 # =============================================================================
 
+# Thème de gum : si l'environnement fournit déjà les GUM_* (session Omarchy),
+# on n'y touche pas. Sinon on lit le thème Omarchy courant, et à défaut on
+# utilise des couleurs ANSI de base (0-15), donc celles du terminal : la TUI
+# reste lisible et cohérente sur une distribution sans Omarchy.
+_theme_env() {
+	local file="${XDG_STATE_HOME:-${HOME}/.local/state}/omarchy/current/theme/gum_env.lua"
+	local key val
+
+	if [[ -n "${GUM_CHOOSE_CURSOR_FOREGROUND:-}" ]]; then
+		return 0
+	fi
+	if [[ -r ${file} ]]; then
+		while IFS=' ' read -r key val; do
+			[[ -n ${key} ]] || continue
+			if [[ -z ${!key:-} ]]; then
+				export "${key}=${val}"
+			fi
+		done < <(sed -n 's/^hl\.env("\([A-Z0-9_]*\)", "\(#[0-9a-fA-F]\{6\}\)").*$/\1 \2/p' "${file}" || true)
+	fi
+	if [[ -n "${GUM_CHOOSE_CURSOR_FOREGROUND:-}" ]]; then
+		return 0
+	fi
+
+	# Repli portable : couleurs ANSI de base, celles du thème du terminal.
+	export GUM_CHOOSE_CURSOR_FOREGROUND=6
+	export GUM_CHOOSE_HEADER_FOREGROUND=7
+	export GUM_CHOOSE_SELECTED_FOREGROUND=0
+	export GUM_CHOOSE_SELECTED_BACKGROUND=6
+	export GUM_CONFIRM_PROMPT_FOREGROUND=6
+	export GUM_CONFIRM_SELECTED_FOREGROUND=0
+	export GUM_CONFIRM_SELECTED_BACKGROUND=6
+	export GUM_CONFIRM_UNSELECTED_FOREGROUND=7
+	export GUM_INPUT_PROMPT_FOREGROUND=6
+	export GUM_INPUT_HEADER_FOREGROUND=7
+	export GUM_INPUT_PLACEHOLDER_FOREGROUND=8
+	export GUM_FILE_CURSOR_FOREGROUND=0
+	export GUM_FILE_CURSOR_BACKGROUND=6
+	export GUM_FILE_HEADER_FOREGROUND=7
+	export GUM_PAGER_MATCH_FOREGROUND=6
+	return 0
+}
+
 _die() {
 	printf ' ✗ %s\n' "${*}" >&2
 	exit 1
@@ -915,8 +957,9 @@ main() {
 	esac
 
 	[[ -t 0 ]] && [[ -t 1 ]] || _die "cette interface nécessite un terminal interactif"
-	command -v gum >/dev/null 2>&1 || _die "gum est requis (pacman -S gum)"
+	command -v gum >/dev/null 2>&1 || _die "gum est requis (paquet gum)"
 	command -v awk >/dev/null 2>&1 || _die "awk est requis (paquet gawk ou mawk)"
+	_theme_env
 	[[ -x ${CLI} ]] || _die "script principal introuvable : ${CLI}"
 
 	local err=""
