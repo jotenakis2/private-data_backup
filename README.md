@@ -58,6 +58,7 @@ private-data_backup.sh timer-add PROFIL hebdomadaire JOUR HH:MM
 private-data_backup.sh timer-remove PROFIL
 private-data_backup.sh timer-list [--porcelain]
 private-data_backup.sh timer-run PROFIL
+private-data_backup.sh timer-sync
 private-data_backup.sh timer-linger
 private-data_backup.sh profile-add NOM DOSSIER [BINAIRE] [EXCLUSIONS]
 private-data_backup.sh profile-remove NOM
@@ -102,6 +103,18 @@ private-data_backup.sh timer-linger
 `timer-list` affiche la fréquence, la prochaine exécution, l'état, le dernier
 résultat et rappelle l'état du linger. La TUI expose les mêmes actions dans
 l'écran **Planification**.
+
+Les services planifiés activent le **mode strict** : un profil ignoré
+(application surveillée encore ouverte, source absente) compte comme un échec.
+Le service sort alors en code 1, `timer-list` affiche `exit-code` et
+`systemctl --user --failed` le signale — une sauvegarde non faite n'est plus
+silencieuse. Les exécutions manuelles gardent le comportement souple
+(profil ignoré, code 0).
+
+`timer-sync` régénère le service partagé (chemin absolu du script, fichier de
+configuration, attente du verrou, mode strict) sans modifier les
+planifications. À lancer après une mise à jour de l'outil ; `timer-list` le
+rappelle si le service est obsolète.
 
 ## Configuration
 

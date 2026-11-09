@@ -67,6 +67,10 @@ NAS_TIMEOUT=20
 # planifiés la portent à 2 h pour que des timers simultanés s'enchaînent au
 # lieu d'échouer.
 LOCK_WAIT="${PRIVATE_BACKUP_LOCK_WAIT:-0}"
+# Mode strict : un profil ignoré (application ouverte, source absente) compte
+# comme un échec. Activé par les services systemd planifiés, pour que
+# systemd/journal/timer-list signalent une sauvegarde non effectuée.
+STRICT_SKIP="${PRIVATE_BACKUP_STRICT_SKIP:-0}"
 ENCRYPT=""
 AGE_RECIPIENT=""
 AGE_IDENTITY=""
@@ -1169,6 +1173,7 @@ _usage() {
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-remove" "${r}" "${d}" "PROFIL" "${r}" "supprimer la planification d'un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-list" "${r}" "${d}" "[--porcelain]" "${r}" "lister les sauvegardes automatiques"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-run" "${r}" "${d}" "PROFIL" "${r}" "lancer la sauvegarde planifiée maintenant"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-sync" "${r}" "${d}" "" "${r}" "régénérer le service des planifications"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-linger" "${r}" "${d}" "" "${r}" "autoriser les timers hors session (root)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-add" "${r}" "${d}" "NOM DOSSIER [BINAIRE] [EXCL]" "${r}" "ajouter ou modifier un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
@@ -1645,7 +1650,15 @@ backup() {
 		rc_one=$?
 		case "${rc_one}" in
 		0) done_count=$((done_count + 1)) ;;
-		3) skipped=$((skipped + 1)) ;;
+		3)
+			if ((STRICT_SKIP == 1)); then
+				# Planifié : une sauvegarde non faite doit être visible.
+				rc=1
+				FAILURES=$((FAILURES + 1))
+			else
+				skipped=$((skipped + 1))
+			fi
+			;;
 		*)
 			rc=1
 			FAILURES=$((FAILURES + 1))
@@ -2526,6 +2539,7 @@ _timer_write_service() {
 		"[Service]" \
 		"Type=oneshot" \
 		"Environment=PRIVATE_BACKUP_LOCK_WAIT=7200" \
+		"Environment=PRIVATE_BACKUP_STRICT_SKIP=1" \
 		"ExecStart=\"${script}\" ${cfgexec}backup %i" \
 		"TimeoutStartSec=12h" \
 		"Nice=10" \
@@ -2891,15 +2905,52 @@ timer_list() {
 		;;
 	*) _WARN "état du linger indéterminé (loginctl indisponible)" ;;
 	esac
-	# Signale un template pointant vers un autre emplacement du script.
+	# Signale un template obsolète (chemin du script ou mode strict absent).
 	file="${dir}/${SCRIPTNAME}@.service"
-	if [[ -f ${file} ]] && ! grep -qF "${SELF_PATH//%/%%}" "${file}" 2>/dev/null; then
-		_WARN "le service pointe vers un autre chemin que ${SELF_PATH} — relance timer-add"
+	if [[ -f ${file} ]]; then
+		if ! grep -qF "${SELF_PATH//%/%%}" "${file}" 2>/dev/null; then
+			_WARN "le service pointe vers un autre chemin que ${SELF_PATH} — relance ${SCRIPTNAME} timer-sync"
+		fi
+		if ! grep -qF "PRIVATE_BACKUP_STRICT_SKIP=1" "${file}" 2>/dev/null; then
+			_WARN "service généré avant le mode strict — relance ${SCRIPTNAME} timer-sync"
+		fi
 	fi
 	local cn=""
 	cn="$(_count "${n}" "planification enregistrée" "planifications enregistrées")"
 	_INFO "${cn} : ${dir}"
 	return 0
+}
+
+# Réécrit le template de service (chemin du script, config, réglages) sans
+# toucher aux planifications. Utile après mise à jour de l'outil.
+timer_sync() {
+	local dir="" path="" cfg="" rc=0
+	dir="$(_timer_unit_dir)"
+	if ! compgen -G "${dir}/${SCRIPTNAME}@*.timer" >/dev/null; then
+		_INFO "aucune planification à mettre à jour"
+		return 0
+	fi
+	if ! _timer_need_systemd; then
+		return 1
+	fi
+	if [[ -n ${CFG_FILE} ]]; then
+		cfg="$(readlink -f -- "${CFG_FILE}" 2>/dev/null)" || cfg="${CFG_FILE}"
+	fi
+	path="${dir}/${SCRIPTNAME}@.service"
+	if ((DRY_RUN == 1)); then
+		_INFO "réécrirait ${path} (script, config, verrou, mode strict)"
+		return 0
+	fi
+	if ! _timer_write_service "${cfg}"; then
+		return 1
+	fi
+	if ! "${SYSTEMCTL_BIN}" --user daemon-reload 2>/dev/null; then
+		_WARN "daemon-reload a échoué"
+		rc=1
+	fi
+	_OK "service mis à jour : ${path}"
+	_INFO "les planifications existantes sont conservées"
+	return "${rc}"
 }
 
 timer_linger() {
@@ -3367,7 +3418,7 @@ main() {
 	fi
 
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-list|timer-run|timer-linger|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
+	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-list|timer-run|timer-sync|timer-linger|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
 	*)
 		_ERR "commande inconnue : ${cmd}"
 		printf '\n' >&2
@@ -3433,7 +3484,7 @@ main() {
 	# Les commandes de consultation (`show`, `list`, `config-path`…) sont
 	# appelées en boucle par la TUI : elles ne créent pas de journal.
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-run|timer-linger|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
+	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-run|timer-sync|timer-linger|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
 	*) LOG_RUN=0 ;;
 	esac
 	if ((LOG_RUN == 1)); then
@@ -3522,6 +3573,10 @@ main() {
 		;;
 	timer-run)
 		timer_run "${positional[0]:-}"
+		rc=$?
+		;;
+	timer-sync)
+		timer_sync
 		rc=$?
 		;;
 	timer-linger)

@@ -93,6 +93,11 @@ utilisateur (aucun privilège root). Un service modèle
 .IR private\-data\_backup@.service
 et un timer par profil sont écrits dans
 .IR ~/.config/systemd/user .
+Le service active le mode strict : un profil ignoré (application surveillée
+ouverte, source absente) fait échouer le service, visible dans
+.B timer-list
+et
+.BR "systemctl --user \-\-failed" .
 .TP
 .B timer-add \fIPROFIL hebdomadaire JOUR HH:MM\fR
 Idem, une fois par semaine ; JOUR accepte lundi…dimanche (ou Mon…Sun).
@@ -110,6 +115,11 @@ est rappelé en fin de liste.
 .B timer-run \fIPROFIL\fR
 Lance immédiatement le service de sauvegarde planifié (sans attendre le
 timer).
+.TP
+.B timer-sync
+Régénère le service partagé des planifications (chemin absolu du script,
+fichier de configuration, attente du verrou, mode strict) sans toucher aux
+horaires. À lancer après une mise à jour de l'outil.
 .TP
 .B timer-linger
 Autorise les timers à tourner même sans session ouverte, via

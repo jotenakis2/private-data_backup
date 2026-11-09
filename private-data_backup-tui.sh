@@ -43,6 +43,7 @@ readonly ICON_CONFIG=$'\uf013'
 readonly ICON_CLOCK=$'\uf017'
 readonly ICON_PLAY=$'\uf04b'
 readonly ICON_LOCK=$'\uf023'
+readonly ICON_SYNC=$'\uf021'
 
 # Profils (`show --porcelain`).
 declare -a P_NAME=() P_SRC=() P_CMD=() P_ARCH=() P_DATE=() P_SIZE=() P_EXCL=()
@@ -535,6 +536,13 @@ _timer_run() {
 	return 0
 }
 
+_timer_sync() {
+	printf '\n'
+	"${CLI}" timer-sync
+	_pause
+	return 0
+}
+
 _timer_linger() {
 	printf '\n'
 	if ! gum confirm --default=false --affirmative "Autoriser" --negative "Annuler" \
@@ -577,12 +585,14 @@ _screen_timers() {
 			"${ICON_PLUS}  Programmer ou modifier un profil" \
 			"${ICON_TRASH}  Supprimer une planification" \
 			"${ICON_PLAY}  Lancer maintenant" \
+			"${ICON_SYNC}  Mettre à jour le service" \
 			"${ICON_LOCK}  Autoriser hors session (linger)" \
 			"Retour")" || return 0
 		case "${action}" in
 		*Programmer*) _timer_edit ;;
 		*Supprimer*) _timer_remove ;;
 		*Lancer*) _timer_run ;;
+		*Mettre*) _timer_sync ;;
 		*Autoriser*) _timer_linger ;;
 		*) return 0 ;;
 		esac
