@@ -774,6 +774,26 @@ _profile_edit() {
 	return 0
 }
 
+_profile_adopt() {
+	printf '\n'
+	"${CLI}" adopt-orphans --dry-run
+	if ! gum confirm --default=false --affirmative "Adopter" --negative "Annuler" \
+		"Ajouter ces profils orphelins à la configuration ?"; then
+		return 0
+	fi
+	printf '\n'
+	"${CLI}" adopt-orphans --yes
+	_pause
+	return 0
+}
+
+_profile_check() {
+	printf '\n'
+	"${CLI}" config-check
+	_pause
+	return 0
+}
+
 _profile_remove() {
 	local pos=""
 	pos="$(_profile_pick)" || return 0
@@ -806,11 +826,15 @@ _screen_profiles() {
 		"${ICON_PLUS}  Ajouter un profil" \
 		"${ICON_EDIT}  Modifier un profil" \
 		"${ICON_TRASH}  Retirer un profil" \
+		"${ICON_CHECK}  Adopter les profils orphelins" \
+		"${ICON_INFO}  Vérifier les conflits" \
 		"Retour")" || return 0
 	case "${action}" in
 	*Ajouter*) _profile_add ;;
 	*Modifier*) _profile_edit ;;
 	*Retirer*) _profile_remove ;;
+	*Adopter*) _profile_adopt ;;
+	*Vérifier*) _profile_check ;;
 	*) ;;
 	esac
 	return 0
@@ -1103,7 +1127,7 @@ main() {
 		printf '  %-16s %s\n' "Archives"      "voir, restaurer une version, vérifier, supprimer (x pour"
 		printf '  %-16s %s\n' ""              "cocher plusieurs archives), chiffrer les archives en clair,"
 		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
-		printf '  %-16s %s\n' "Profils"       "ajouter, modifier ou retirer un profil"
+		printf '  %-16s %s\n' "Profils"       "ajouter, modifier, retirer, adopter les orphelins, conflits"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
 		printf '  %-16s %s\n' "Description"   "présentation de l'outil"
 		printf '\nSécurité : vérification, instantanés, confirmations et verrou\n'

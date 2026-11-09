@@ -1019,6 +1019,71 @@ _verify_archive() {
 	return 1
 }
 
+# Liste les entrées d'une archive (chiffrée ou non).
+_archive_list() {
+	if _archive_is_encrypted "${1}"; then
+		_decrypt "${1}" | tar -tz
+	else
+		tar -tzf "${1}"
+	fi
+}
+
+# Écrit dans ${2} la racine de l'archive ${1} (chemin du profil sauvegardé).
+# Échoue si l'archive contient plusieurs racines distinctes.
+_archive_root_to() {
+	local f="${1}" out="${2}" root="" line=""
+	while IFS= read -r line; do
+		line="${line#./}"
+		if [[ -z ${root} ]]; then
+			root="${line%/}"
+			continue
+		fi
+		if [[ ${line%/} != "${root}" ]] && [[ ${line} != "${root}/"* ]]; then
+			return 1
+		fi
+	done < <(_archive_list "${f}" 2>/dev/null || true)
+	[[ -n ${root} ]] || return 1
+	printf '%s' "${root}" >"${out}"
+	return 0
+}
+
+_archive_root() {
+	local f="${1}" tmp=""
+	tmp="$(mktemp)" || return 1
+	if ! _archive_root_to "${f}" "${tmp}" || [[ ! -s ${tmp} ]]; then
+		rm -f -- "${tmp}"
+		return 1
+	fi
+	cat -- "${tmp}"
+	rm -f -- "${tmp}"
+	return 0
+}
+
+# Deux profils se chevauchent-ils (même dossier, ou l'un contenu dans l'autre) ?
+_source_overlap() {
+	local p1="${1}" p2="${2}"
+	[[ ${p1} == "${p2}" ]] && return 0
+	[[ ${p1} == "${p2}/"* ]] && return 0
+	[[ ${p2} == "${p1}/"* ]] && return 0
+	return 1
+}
+
+# Avertit sur les profils dont les dossiers se chevauchent.
+_config_conflicts() {
+	local -a keys=()
+	local i j
+	mapfile -t keys < <(printf '%s\n' "${!SOURCES[@]}" | sort || true)
+	((${#keys[@]} >= 2)) || return 0
+	for ((i = 0; i < ${#keys[@]}; i++)); do
+		for ((j = i + 1; j < ${#keys[@]}; j++)); do
+			if _source_overlap "${SOURCES[${keys[i]}]}" "${SOURCES[${keys[j]}]}"; then
+				_WARN "profils ${keys[i]} (${SOURCES[${keys[i]}]}) et ${keys[j]} (${SOURCES[${keys[j]}]}) : dossiers identiques ou imbriqués"
+			fi
+		done
+	done
+	return 0
+}
+
 _known_profile() {
 	[[ -n "${SOURCES[${1}]:-}" ]]
 }
@@ -1079,6 +1144,7 @@ _usage() {
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "verify" "${r}" "${d}" "FICHIER" "${r}" "vérifier l'intégrité d'une archive"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "delete-archive" "${r}" "${d}" "FICHIER..." "${r}" "supprimer des archives"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "encrypt-archives" "${r}" "${d}" "[PROFIL...]" "${r}" "chiffrer les archives en clair (age)"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "adopt-orphans" "${r}" "${d}" "[PROFIL...]" "${r}" "réintégrer les profils orphelins (dossier déduit)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-add" "${r}" "${d}" "NOM DOSSIER [BINAIRE] [EXCL]" "${r}" "ajouter ou modifier un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-set" "${r}" "${d}" "CLE=VALEUR..." "${r}" "modifier des paramètres"
@@ -2197,6 +2263,103 @@ config_set() {
 }
 
 # =============================================================================
+# ADOPTION DES PROFILS ORPHELINS
+# =============================================================================
+
+adopt_orphans() {
+	local -a filtres=("${@}") noms=() sources=()
+	local -A filtre=() vu=()
+	local i group src tmp="" rc=0
+
+	_check_nas || return 1
+	_collect_archives
+
+	for i in "${filtres[@]}"; do
+		i="${i^^}"
+		if _known_profile "${i}"; then
+			_ERR "profil déjà dans la configuration : ${i}"
+			return 2
+		fi
+		filtre[${i}]=1
+	done
+
+	# Un candidat par profil orphelin : son archive la plus récente.
+	for i in "${!ARCH_GROUP[@]}"; do
+		group="${ARCH_GROUP[${i}]}"
+		[[ ${group} == "${SNAPSHOT_SUBDIR}/"* ]] && continue
+		_known_profile "${group}" && continue
+		[[ -n "${vu[${group}]:-}" ]] && continue
+		vu[${group}]=1
+		if ((${#filtres[@]} > 0)) && [[ -z "${filtre[${group}]:-}" ]]; then
+			continue
+		fi
+		if ((DRY_RUN == 1)); then
+			_INFO "analyse de ${ARCH_PATH[${i}]##*/}…"
+		fi
+		tmp="$(mktemp)" || return 1
+		if ! _RUN "Analyse de ${ARCH_PATH[${i}]##*/}" _archive_root_to "${ARCH_PATH[${i}]}" "${tmp}"; then
+			rm -f -- "${tmp}"
+			_WARN "${group} : racine indéterminée (plusieurs dossiers dans l'archive) — ignoré"
+			rc=1
+			continue
+		fi
+		src="$(cat -- "${tmp}")"
+		rm -f -- "${tmp}"
+		noms+=("${group}")
+		sources+=("${src}")
+	done
+
+	if ((${#noms[@]} == 0)); then
+		_INFO "aucun profil orphelin à adopter"
+		return "${rc}"
+	fi
+
+	printf '\n%bProfils orphelins à adopter%b :\n' "${C_BOLD}" "${C_RESET}"
+	for i in "${!noms[@]}"; do
+		printf '  %b+%b %-14s ← ~/%s\n' "${C_GREEN}" "${C_RESET}" "${noms[${i}]}" "${sources[${i}]}"
+	done
+
+	# Conflits avec les profils existants et entre les adoptés.
+	local k j
+	for i in "${!noms[@]}"; do
+		for k in "${!SOURCES[@]}"; do
+			if _source_overlap "${sources[${i}]}" "${SOURCES[${k}]}"; then
+				_WARN "${noms[${i}]} (~/${sources[${i}]}) chevauche ${k} (~/${SOURCES[${k}]})"
+			fi
+		done
+		for ((j = 0; j < i; j++)); do
+			if _source_overlap "${sources[${i}]}" "${sources[${j}]}"; then
+				_WARN "${noms[${i}]} (~/${sources[${i}]}) chevauche ${noms[${j}]} (~/${sources[${j}]})"
+			fi
+		done
+	done
+
+	if ((DRY_RUN == 1)); then
+		_INFO "--dry-run : rien n'a été écrit"
+		return "${rc}"
+	fi
+	local cn=""
+	cn="$(_count "${#noms[@]}" profil profils)"
+	if ! _confirm "Ajouter ${cn} à la configuration ?"; then
+		_INFO "annulé — configuration inchangée"
+		return "${rc}"
+	fi
+
+	for i in "${!noms[@]}"; do
+		SOURCES[${noms[${i}]}]="${sources[${i}]}"
+	done
+	if ! _config_save; then
+		_ERR "adoption non enregistrée"
+		return 1
+	fi
+	_config_conflicts
+	local cn=""
+	cn="$(_count "${#noms[@]}" "profil adopté" "profils adoptés")"
+	_INFO "${cn} ; ils ne sont plus orphelins"
+	return "${rc}"
+}
+
+# =============================================================================
 # PROFILS (écriture dans le fichier de configuration)
 # =============================================================================
 
@@ -2616,7 +2779,7 @@ main() {
 	fi
 
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
+	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|adopt-orphans|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
 	*)
 		_ERR "commande inconnue : ${cmd}"
 		printf '\n' >&2
@@ -2682,7 +2845,7 @@ main() {
 	# Les commandes de consultation (`show`, `list`, `config-path`…) sont
 	# appelées en boucle par la TUI : elles ne créent pas de journal.
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
+	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
 	*) LOG_RUN=0 ;;
 	esac
 	if ((LOG_RUN == 1)); then
@@ -2702,7 +2865,7 @@ main() {
 	# pourraient produire deux archives concurrentes, et delete_old pourrait
 	# supprimer une archive en cours d'écriture).
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|profile-add|profile-remove|config-set)
+	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|profile-add|profile-remove|config-set)
 		needs_lock=1
 		;;
 	*) needs_lock=0 ;;
@@ -2753,6 +2916,10 @@ main() {
 		encrypt_archives "${positional[@]}"
 		rc=$?
 		;;
+	adopt-orphans)
+		adopt_orphans "${positional[@]}"
+		rc=$?
+		;;
 	profile-add)
 		profile_add "${positional[0]:-}" "${positional[1]:-}" "${positional[2]:-}" "${positional[3]:-}"
 		rc=$?
@@ -2771,6 +2938,7 @@ main() {
 		;;
 	config-check)
 		_INFO "configuration valide : ${CFG_FILE}"
+		_config_conflicts
 		rc=0
 		;;
 	show)

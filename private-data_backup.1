@@ -80,6 +80,13 @@ au stockage).
 Chiffre avec age les archives encore en clair et supprime les originaux,
 après vérification de la copie chiffrée.
 .TP
+.B adopt-orphans \fR[\fIprofil\fR...]
+Réintègre des profils orphelins dans la configuration : le dossier sauvegardé
+est déduit de l'archive la plus récente (une racine unique est exigée), puis
+écrit dans
+.BR SOURCES .
+Les chevauchements de dossiers entre profils sont signalés.
+.TP
 .B profile-add \fINOM DOSSIER \fR[\fIBINAIRE\fR] [\fIEXCLUSIONS\fR]
 Ajoute ou modifie un profil dans le fichier de configuration.
 .TP
@@ -95,7 +102,8 @@ NAS_TIMEOUT, LOG_FILES, ENCRYPT, AGE_RECIPIENT, AGE_IDENTITY.
 Affiche le chemin du fichier de configuration chargé, et rien d'autre.
 .TP
 .B config-check
-Valide la configuration et quitte (code 0 si elle est valide).
+Valide la configuration, signale les profils dont les dossiers se chevauchent,
+et quitte (code 0 si elle est valide).
 .TP
 .B \-\-delete\-logs
 Supprime les journaux du répertoire de journaux. Action autonome, utilisable
