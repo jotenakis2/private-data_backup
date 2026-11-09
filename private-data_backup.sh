@@ -45,7 +45,7 @@ SCRIPTNAME="${0##*/}"
 SCRIPTNAME="${SCRIPTNAME%.sh}"
 readonly SCRIPTNAME
 
-readonly CONFIG_BASENAME="private_data_backup.conf"
+readonly CONFIG_BASENAME="private-data_backup.conf"
 readonly SNAPSHOT_SUBDIR="pre-restore"
 
 # Valeurs de repli (surchargées par le fichier de configuration).
@@ -171,15 +171,24 @@ _acquire_lock() {
 delete_logs() {
 	local dir="${HOME}/.local/share/${SCRIPTNAME}"
 	local f sz=0 total=0 rc=0 human=""
-	local -a files=()
+	local -a files=() others=()
 
 	if [[ ! -d ${dir} ]]; then
 		_INFO "aucun journal (${dir} absent)"
 		return 0
 	fi
-	mapfile -t files < <(find "${dir}" -maxdepth 1 -type f -name "${SCRIPTNAME}-*.log" -print 2>/dev/null || true)
+	# Journaux + restes éventuels du fichier témoin d'écriture (.write-probe.PID).
+	mapfile -t files < <(find "${dir}" -maxdepth 1 -type f \
+		\( -name "${SCRIPTNAME}-*.log" -o -name ".write-probe.*" \) -print 2>/dev/null || true)
+	# Tout le reste est laissé en place (et signalé).
+	mapfile -t others < <(find "${dir}" -maxdepth 1 -type f \
+		! -name "${SCRIPTNAME}-*.log" ! -name ".write-probe.*" -print 2>/dev/null || true)
+
 	if ((${#files[@]} == 0)); then
 		_INFO "aucun journal à supprimer dans ${dir}"
+		if ((${#others[@]} > 0)); then
+			_INFO "${#others[@]} autre(s) fichier(s) conservé(s)"
+		fi
 		return 0
 	fi
 
@@ -194,6 +203,9 @@ delete_logs() {
 			_INFO "serait supprimé : ${f##*/}"
 		done
 		_INFO "${#files[@]} journal(aux), ${human} — --dry-run, rien n'a été supprimé"
+		if ((${#others[@]} > 0)); then
+			_INFO "${#others[@]} autre(s) fichier(s) conservé(s)"
+		fi
 		return 0
 	fi
 
@@ -207,6 +219,9 @@ delete_logs() {
 			rc=1
 		fi
 	done
+	if ((${#others[@]} > 0)); then
+		_INFO "${#others[@]} autre(s) fichier(s) conservé(s) dans ${dir}"
+	fi
 	printf '\n'
 	return "${rc}"
 }
