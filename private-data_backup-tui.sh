@@ -498,6 +498,28 @@ _archives_delete() {
 }
 
 _archives_encrypt() {
+	local enc="" i clair=0
+	enc="$(_config_get ENCRYPT)"
+	if [[ ${enc} != "age" ]]; then
+		gum style --border rounded --padding "0 2" --foreground 3 \
+			"${ICON_WARN}  Chiffrement inactif : active-le dans Configuration → Chiffrement."
+		return 0
+	fi
+	if ! _load_archives; then
+		gum style --border rounded --padding "0 2" --foreground 1 "${ICON_WARN}  Liste indisponible (NAS monté ?)"
+		return 0
+	fi
+	for i in "${!A_PATH[@]}"; do
+		case "${A_PATH[${i}]}" in
+		*.age) ;;
+		*) clair=$((clair + 1)) ;;
+		esac
+	done
+	if ((clair == 0)); then
+		gum style --border rounded --padding "0 2" --foreground 3 \
+			"${ICON_EMPTY}  Aucune archive en clair à chiffrer."
+		return 0
+	fi
 	printf '\n'
 	"${CLI}" encrypt-archives --dry-run
 	if ! gum confirm --default=false --affirmative "Chiffrer" --negative "Annuler" \
@@ -511,8 +533,14 @@ _archives_encrypt() {
 }
 
 _archives_retention() {
+	local out="" rc=0
 	printf '\n'
-	"${CLI}" delete_old --dry-run
+	out="$("${CLI}" delete_old --dry-run 2>&1)" || rc=$?
+	printf '%s\n' "${out}"
+	if ((rc != 0)) || [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
+		_pause
+		return 0
+	fi
 	if ! gum confirm --default=false --affirmative "Appliquer" --negative "Annuler" \
 		"Appliquer cette rétention (suppressions définitives) ?"; then
 		return 0
@@ -524,8 +552,14 @@ _archives_retention() {
 }
 
 _archives_purge() {
+	local out="" rc=0
 	printf '\n'
-	"${CLI}" delete_old --purge-orphans --dry-run --no-verify
+	out="$("${CLI}" delete_old --purge-orphans --dry-run --no-verify 2>&1)" || rc=$?
+	printf '%s\n' "${out}"
+	if ((rc != 0)) || [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
+		_pause
+		return 0
+	fi
 	if ! gum confirm --default=false --affirmative "Purger" --negative "Annuler" \
 		"Supprimer tous les profils hors configuration (définitif) ?"; then
 		return 0
