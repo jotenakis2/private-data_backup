@@ -997,6 +997,7 @@ OPTS
 	printf '\n%-13s : %s\n' "Configuration" "${conf_affichee}"
 	printf '%-13s : %s\n' "Stockage" "${NAS_MOUNT:-${NAS}/${BACKUP_SUBDIR}}"
 	printf '%-13s : %s\n' "Secrets" "archives et logs 0600, dossiers 0700 (umask 077)"
+	printf '%-13s : %s\n' "Journaux" "${HOME}/.local/share/${SCRIPTNAME}"
 	return 0
 }
 
