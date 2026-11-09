@@ -35,7 +35,7 @@ export LC_COLLATE=C
 # Emplacements recherchés, dans l'ordre :
 #   1. --config FICHIER
 #   2. $PRIVATE_BACKUP_CONFIG
-#   3. private_data_backup.conf à côté du script (liens symboliques résolus)
+#   3. private-data_backup.conf à côté du script (liens symboliques résolus)
 #   4. ${XDG_CONFIG_HOME:-$HOME/.config}/private-data_backup/config
 #
 # Toute variable absente du fichier retombe sur `_config_defaults`.
@@ -1080,6 +1080,7 @@ _usage() {
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-set" "${r}" "${d}" "CLE=VALEUR..." "${r}" "modifier des paramètres"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-path" "${r}" "${d}" "" "${r}" "chemin du fichier de configuration"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-check" "${r}" "${d}" "" "${r}" "valider la configuration"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "--delete-logs" "${r}" "${d}" "[--dry-run] [--yes]" "${r}" "supprimer les journaux"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "help | --version" "${r}" "${d}" "" "${r}" "cette aide, version"
 

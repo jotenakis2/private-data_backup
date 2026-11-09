@@ -56,16 +56,17 @@ private-data_backup.sh profile-add NOM DOSSIER [BINAIRE] [EXCLUSIONS]
 private-data_backup.sh profile-remove NOM
 private-data_backup.sh config-set CLE=VALEUR...
 private-data_backup.sh config-path | config-check
+private-data_backup.sh --delete-logs [--dry-run] [--yes]
 private-data_backup.sh help | --version
 ```
 
 Interface texte :
 
 ```sh
-private-data_backup-tui.sh      # Sauvegarder / Restaurer / Archives / Profils / Configuration
+private-data_backup-tui.sh      # Description / Sauvegarder / Restaurer / Archives / Profils / Configuration
 ```
 
-Codes de sortie : `0` succès, `1` échec, `2` usage ou configuration invalide.
+Codes de sortie : `0` succès, `1` échec, `2` usage ou configuration invalide, `3` opération annulée.
 
 ## Configuration
 
@@ -73,7 +74,7 @@ Fichier bash, chargé dans cet ordre :
 
 1. `--config FICHIER`
 2. `$PRIVATE_BACKUP_CONFIG`
-3. `private_data_backup.conf` à côté du script (liens résolus)
+3. `private-data_backup.conf` à côté du script (liens résolus)
 4. `${XDG_CONFIG_HOME:-$HOME/.config}/private-data_backup/config`
 
 Le fichier livré (`private-data_backup.conf.example`) sert de modèle : profils

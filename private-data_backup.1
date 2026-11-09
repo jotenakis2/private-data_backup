@@ -69,16 +69,16 @@ profils hors configuration (orphelins).
 .B list \fR[\fIPROFIL\fR]
 Liste toutes les archives, orphelins marqués d'une astérisque.
 .TP
-.B encrypt-archives \fR[\fIprofil\fR...]
-Chiffre avec age les archives encore en clair et supprime les originaux,
-après vérification de la copie chiffrée.
-.TP
 .B verify \fIFichier\fR
 Vérifie l'intégrité d'une archive.
 .TP
 .B delete-archive \fIFichier\fR...
 Supprime une ou plusieurs archives précises du stockage (chemins contraints
 au stockage).
+.TP
+.B encrypt-archives \fR[\fIprofil\fR...]
+Chiffre avec age les archives encore en clair et supprime les originaux,
+après vérification de la copie chiffrée.
 .TP
 .B profile-add \fINOM DOSSIER \fR[\fIBINAIRE\fR] [\fIEXCLUSIONS\fR]
 Ajoute ou modifie un profil dans le fichier de configuration.
@@ -150,7 +150,7 @@ Fichier bash chargé dans cet ordre :
 la variable d'environnement
 .B PRIVATE_BACKUP_CONFIG
 .IP "3." 4
-.B private\-data\-backup.conf
+.B private\-data\_backup.conf
 à côté du script (liens symboliques résolus)
 .IP "4." 4
 .BR "$XDG_CONFIG_HOME/private\-data\_backup/config" ,
@@ -158,7 +158,7 @@ par défaut
 .BR ~/.config/private\-data\_backup/config .
 .PP
 Le fichier livré,
-.BR private\-data\-backup.conf.example ,
+.BR private\-data\_backup.conf.example ,
 sert de modèle. Les blocs délimités par
 .B # >>> NOM
 et

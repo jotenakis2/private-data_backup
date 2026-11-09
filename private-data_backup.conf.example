@@ -9,7 +9,7 @@
 # Emplacements recherchés (dans cet ordre) :
 #   1. --config FICHIER
 #   2. $PRIVATE_BACKUP_CONFIG
-#   3. private_data_backup.conf à côté du script (liens symboliques résolus)
+#   3. private-data_backup.conf à côté du script (liens symboliques résolus)
 #   4. ${XDG_CONFIG_HOME:-$HOME/.config}/private-data_backup/config
 #
 # Toute variable absente retombe sur une valeur par défaut du script.
