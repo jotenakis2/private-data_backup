@@ -276,15 +276,17 @@ _error_text() {
 # =============================================================================
 
 _label() {
-	local i="${1}" line="" when="" size=""
+	local i="${1}" line="" when="" size="" cmd=""
+	# Colonne « binaire surveillé » : le nom du processus, ou un tiret.
+	cmd="${P_CMD[${i}]:--}"
 	if [[ -n ${P_ARCH[${i}]} ]]; then
 		when="$(_fmt_dt "${P_DATE[${i}]}")"
 		size="$(_human "${P_SIZE[${i}]}")"
-		line="$(printf '%-14s %-32s  %s  (%s)' \
-			"${P_NAME[${i}]}" "${P_SRC[${i}]}" "${when}" "${size}")"
+		line="$(printf '%-14s %-30s %-12s %s  (%s)' \
+			"${P_NAME[${i}]}" "${P_SRC[${i}]}" "${cmd}" "${when}" "${size}")"
 	else
-		line="$(printf '%-14s %-32s  %s' \
-			"${P_NAME[${i}]}" "${P_SRC[${i}]}" "aucune archive")"
+		line="$(printf '%-14s %-30s %-12s %s' \
+			"${P_NAME[${i}]}" "${P_SRC[${i}]}" "${cmd}" "aucune archive")"
 	fi
 	printf '%s' "${line}"
 }
