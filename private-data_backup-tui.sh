@@ -56,10 +56,11 @@ P_CMD_W=12
 declare -a A_GROUP=() A_DATE=() A_SIZE=() A_PATH=()
 
 # Sauvegardes automatiques (`timer-list --porcelain`).
-declare -a T_NAME=() T_FREQ=() T_WHEN=() T_NEXT=() T_STATE=() T_RESULT=()
+declare -a T_NAME=() T_FREQ=() T_WHEN=() T_NEXT=() T_STATE=() T_RESULT=() T_EXT=()
 T_NAME_W=6
 T_FREQ_W=12
 T_NEXT_W=20
+T_EXT_W=3
 
 # Sélections courantes.
 PICK_FILE=""
@@ -366,17 +367,18 @@ _pick_archive() {
 # =============================================================================
 
 _load_timers() {
-	local out="" line="" f_name="" f_freq="" f_when="" f_next="" f_state="" f_result="" label=""
-	T_NAME=(); T_FREQ=(); T_WHEN=(); T_NEXT=(); T_STATE=(); T_RESULT=()
+	local out="" line="" f_name="" f_freq="" f_when="" f_next="" f_state="" f_result="" f_ext="" label=""
+	T_NAME=(); T_FREQ=(); T_WHEN=(); T_NEXT=(); T_STATE=(); T_RESULT=(); T_EXT=()
 	T_NAME_W=6
 	T_FREQ_W=12
 	T_NEXT_W=20
+	T_EXT_W=3
 	if ! out="$("${CLI}" timer-list --porcelain 2>/dev/null)"; then
 		return 1
 	fi
 	while IFS= read -r line; do
 		[[ -n ${line} ]] || continue
-		IFS=$'\t' read -r f_name f_freq f_when f_next f_state f_result <<<"${line}"
+		IFS=$'\t' read -r f_name f_freq f_when f_next f_state f_result f_ext <<<"${line}"
 		[[ -n ${f_name} ]] || continue
 		T_NAME+=("${f_name}")
 		T_FREQ+=("${f_freq}")
@@ -384,20 +386,25 @@ _load_timers() {
 		T_NEXT+=("${f_next}")
 		T_STATE+=("${f_state}")
 		T_RESULT+=("${f_result}")
+		T_EXT+=("${f_ext}")
 		((${#f_name} > T_NAME_W)) && T_NAME_W=${#f_name}
 		label="${f_freq} ${f_when}"
 		((${#label} > T_FREQ_W)) && T_FREQ_W=${#label}
 		((${#f_next} > T_NEXT_W)) && T_NEXT_W=${#f_next}
+		((${#f_ext} > T_EXT_W)) && T_EXT_W=${#f_ext}
 	done <<<"${out}"
 	return 0
 }
 
 _timer_label() {
-	local i="${1}"
-	printf '%-*s %-*s %-*s %s' \
+	local i="${1}" ext=""
+	ext="${T_EXT[${i}]:--}"
+	[[ ${ext} == "oui" ]] || ext="-"
+	printf '%-*s %-*s %-*s %-*s %s' \
 		"${T_NAME_W}" "${T_NAME[${i}]}" \
 		"${T_FREQ_W}" "${T_FREQ[${i}]} ${T_WHEN[${i}]}" \
 		"${T_NEXT_W}" "${T_NEXT[${i}]}" \
+		"${T_EXT_W}" "${ext}" \
 		"${T_RESULT[${i}]}"
 }
 
@@ -424,6 +431,24 @@ _timer_pick() {
 	return 0
 }
 
+_pending_names() {
+	local dir="${XDG_STATE_HOME:-${HOME}/.local/state}/private_data_backup/pending"
+	local file="" out=""
+	[[ -d ${dir} ]] || return 0
+	for file in "${dir}"/*; do
+		[[ -f ${file} ]] || continue
+		out="${out} ${file##*/}"
+	done
+	printf '%s' "${out# }"
+}
+
+_shutdown_installed() {
+	local sys="" ses=""
+	sys="${PRIVATE_BACKUP_SYSTEM_UNIT_DIR:-/etc/systemd/system}/private-data_backup-shutdown.service"
+	ses="${PRIVATE_BACKUP_UNIT_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user}/private-data_backup-session.service"
+	[[ -f ${sys} && -f ${ses} ]]
+}
+
 _linger_state() {
 	local out=""
 	out="$(loginctl show-user "${USER}" --property=Linger --value 2>/dev/null)" || out=""
@@ -431,7 +456,7 @@ _linger_state() {
 }
 
 _timer_edit() {
-	local pos="" name="" cur_pos=-1 freq="" time="" day="" existing="" summary="" choice=""
+	local pos="" name="" cur_pos=-1 freq="" time="" day="" existing="" summary="" choice="" ext=0 mode=""
 	local i="" j=""
 	pos="$(_profile_pick)" || return 0
 	name="${P_NAME[${pos}]}"
@@ -444,6 +469,7 @@ _timer_edit() {
 		fi
 	done
 	if ((cur_pos >= 0)); then
+		[[ ${T_EXT[${cur_pos}]:-non} == "oui" ]] && ext=1
 		freq="${T_FREQ[${cur_pos}]}"
 		# T_WHEN vaut « 18:30 » ou « dimanche 18:30 ».
 		if [[ ${freq} == "hebdomadaire" ]]; then
@@ -492,17 +518,46 @@ _timer_edit() {
 	time="$(gum input --header "Heure (HH:MM)" --value "${time}" --placeholder "18:00")" || return 0
 	[[ -n ${time} ]] || return 0
 
+	# Mode à l'extinction (propre à cette planification).
+	if ((ext == 1)); then
+		mode="$(gum choose --header "Si l'application est ouverte" \
+			"Tenter à l'extinction (actuel)" "Ignorer jusqu'à la prochaine échéance")" || return 0
+	else
+		mode="$(gum choose --header "Si l'application est ouverte" \
+			"Ignorer jusqu'à la prochaine échéance (actuel)" "Tenter à l'extinction")" || return 0
+	fi
+	case "${mode}" in
+	Tenter*) ext=1 ;;
+	*) ext=0 ;;
+	esac
+
 	summary="${name} : ${freq}"
 	[[ ${freq} == "hebdomadaire" ]] && summary="${summary} ${day}"
 	summary="${summary} à ${time}"
+	((ext == 1)) && summary="${summary} — à l'extinction si nécessaire"
 	gum style --border rounded --padding "0 2" "${ICON_CLOCK}  Planification" "" "${summary}"
 	gum confirm --default=false --affirmative "Enregistrer" --negative "Annuler" \
 		"Programmer cette sauvegarde automatique ?" || return 0
 	printf '\n'
 	if [[ ${freq} == "hebdomadaire" ]]; then
-		"${CLI}" timer-add "${name}" hebdomadaire "${day}" "${time}"
+		if ((ext == 1)); then
+			"${CLI}" timer-add "${name}" hebdomadaire "${day}" "${time}" --extinction
+		else
+			"${CLI}" timer-add "${name}" hebdomadaire "${day}" "${time}" --no-extinction
+		fi
 	else
-		"${CLI}" timer-add "${name}" quotidien "${time}"
+		if ((ext == 1)); then
+			"${CLI}" timer-add "${name}" quotidien "${time}" --extinction
+		else
+			"${CLI}" timer-add "${name}" quotidien "${time}" --no-extinction
+		fi
+	fi
+	if ((ext == 1)) && ! _shutdown_installed; then
+		if gum confirm --default=false --affirmative "Installer" --negative "Plus tard" \
+			"Installer le service d'extinction (root) maintenant ?"; then
+			printf '\n'
+			"${CLI}" timer-shutdown-enable --yes
+		fi
 	fi
 	_pause
 	return 0
@@ -532,6 +587,20 @@ _timer_run() {
 	fi
 	printf '\n'
 	"${CLI}" timer-run "${name}"
+	_pause
+	return 0
+}
+
+_timer_pending() {
+	printf '\n'
+	"${CLI}" backup-pending
+	_pause
+	return 0
+}
+
+_timer_shutdown_install() {
+	printf '\n'
+	"${CLI}" timer-shutdown-enable --yes
 	_pause
 	return 0
 }
@@ -576,6 +645,24 @@ _screen_timers() {
 			gum style --border rounded --padding "0 2" --foreground 3 \
 				"${ICON_EMPTY}  Aucune sauvegarde automatique."
 		fi
+		local attente=""
+		attente="$(_pending_names)"
+		if [[ -n ${attente} ]]; then
+			printf '\n'
+			gum style --foreground 3 "${ICON_WARN}  En attente d'extinction : ${attente}"
+		fi
+		if ! _shutdown_installed; then
+			if _load_timers && ((${#T_EXT[@]} > 0)); then
+				local k="" besoin=0
+				for k in "${T_EXT[@]}"; do
+					[[ ${k} == "oui" ]] && besoin=1
+				done
+				if ((besoin == 1)); then
+					printf '\n'
+					gum style --foreground 3 "${ICON_WARN}  Mode extinction utilisé mais service absent."
+				fi
+			fi
+		fi
 		linger="$(_linger_state)"
 		if [[ ${linger} == "no" ]]; then
 			printf '\n'
@@ -585,14 +672,18 @@ _screen_timers() {
 			"${ICON_PLUS}  Programmer ou modifier un profil" \
 			"${ICON_TRASH}  Supprimer une planification" \
 			"${ICON_PLAY}  Lancer maintenant" \
+			"${ICON_SAVE}  Sauvegarder les profils en attente" \
 			"${ICON_SYNC}  Mettre à jour le service" \
+			"${ICON_LOCK}  Installer le service d'extinction" \
 			"${ICON_LOCK}  Autoriser hors session (linger)" \
 			"Retour")" || return 0
 		case "${action}" in
 		*Programmer*) _timer_edit ;;
 		*Supprimer*) _timer_remove ;;
 		*Lancer*) _timer_run ;;
+		*attente*) _timer_pending ;;
 		*Mettre*) _timer_sync ;;
+		*extinction*) _timer_shutdown_install ;;
 		*Autoriser*) _timer_linger ;;
 		*) return 0 ;;
 		esac
@@ -1170,8 +1261,9 @@ Configuration Modifier la destination (montage et sous-dossier), la
               mêmes garde-fous que pour les profils.
 
 Planification Programmer une sauvegarde par profil (timer systemd
-              utilisateur), lister, modifier, supprimer, lancer maintenant
-              et activer le linger pour tourner hors session.
+              utilisateur), choisir le mode « à l'extinction » si
+              l'application est ouverte, lister, modifier, supprimer,
+              lancer maintenant et activer le linger.
 
 OÙ SONT LES CHOSES
 ------------------
@@ -1413,7 +1505,7 @@ main() {
 		printf '  %-16s %s\n' ""              "cocher plusieurs archives), chiffrer les archives en clair,"
 		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
 		printf '  %-16s %s\n' "Profils"       "ajouter, modifier, retirer, adopter les orphelins, conflits"
-		printf '  %-16s %s\n' "Planification" "planifier des sauvegardes (timers systemd --user)"
+		printf '  %-16s %s\n' "Planification" "timers systemd --user, mode extinction, attentes"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
 		printf '  %-16s %s\n' "Description"   "présentation de l'outil"
 		printf '\nSécurité : vérification, instantanés, confirmations et verrou\n'

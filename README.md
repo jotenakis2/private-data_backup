@@ -53,12 +53,15 @@ private-data_backup.sh verify FICHIER
 private-data_backup.sh delete-archive FICHIER... [--yes] [--dry-run]
 private-data_backup.sh encrypt-archives [PROFIL...] [--dry-run] [--yes]
 private-data_backup.sh adopt-orphans [PROFIL...] [--dry-run] [--yes]
-private-data_backup.sh timer-add PROFIL quotidien HH:MM
-private-data_backup.sh timer-add PROFIL hebdomadaire JOUR HH:MM
+private-data_backup.sh timer-add PROFIL quotidien HH:MM [--extinction]
+private-data_backup.sh timer-add PROFIL hebdomadaire JOUR HH:MM [--extinction]
 private-data_backup.sh timer-remove PROFIL
 private-data_backup.sh timer-list [--porcelain]
 private-data_backup.sh timer-run PROFIL
 private-data_backup.sh timer-sync
+private-data_backup.sh timer-shutdown-enable
+private-data_backup.sh timer-shutdown-disable
+private-data_backup.sh backup-pending [--shutdown]
 private-data_backup.sh timer-linger
 private-data_backup.sh profile-add NOM DOSSIER [BINAIRE] [EXCLUSIONS]
 private-data_backup.sh profile-remove NOM
@@ -102,7 +105,7 @@ private-data_backup.sh timer-linger
 
 `timer-list` affiche la fréquence, la prochaine exécution, l'état, le dernier
 résultat et rappelle l'état du linger. La TUI expose les mêmes actions dans
-l'écran **Planification**.
+l'écran **Planification**, y compris le mode extinction.
 
 Les services planifiés activent le **mode strict** : un profil ignoré
 (application surveillée encore ouverte, source absente) compte comme un échec.
@@ -115,6 +118,45 @@ silencieuse. Les exécutions manuelles gardent le comportement souple
 configuration, attente du verrou, mode strict) sans modifier les
 planifications. À lancer après une mise à jour de l'outil ; `timer-list` le
 rappelle si le service est obsolète.
+
+### Mode extinction (par planification)
+
+Chaque planification peut choisir quoi faire si l'application surveillée est
+encore ouverte à l'heure prévue :
+
+```sh
+private-data_backup.sh timer-add BRAVE quotidien 18:30 --extinction
+private-data_backup.sh timer-add BRAVE quotidien 18:30 --no-extinction
+```
+
+Avec `--extinction` :
+
+1. la sauvegarde planifiée est **reportée** (fichier d'attente dans
+   `~/.local/state/private-data_backup/pending/`) et une **notification
+   bureau** est envoyée ;
+2. deux services installés une fois avec
+   `private-data_backup.sh timer-shutdown-enable` exécutent
+   `backup-pending --shutdown` : un service utilisateur à la fin de la session
+   graphique (déconnexion), un service système (root via pkexec) à
+   l'extinction et au redémarrage ;
+3. s'il reste ouverte, l'application est attendue (jusqu'à sa fermeture,
+   sans limite) ; la sauvegarde est ensuite réalisée avec le mode strict ;
+4. en cas de succès l'attente est levée ; sinon elle est conservée pour la
+   prochaine extinction.
+
+Le service système tourne en tant qu'utilisateur (`User=`), après l'arrêt du
+gestionnaire de session, et `TimeoutStartSec=infinity` court-circuite la limite
+de 5 s appliquée par Omarchy à l'arrêt de la session. Le service de session
+utilise `PartOf=graphical-session.target` et `TimeoutStopSec=infinity` ; si une
+extinction l'interrompt, le service système reprend l'attente restante.
+`timer-list` affiche une colonne `EXT.`, les profils en attente et l'état des
+services. Sans le mode, le comportement reste inchangé (profil ignoré,
+prochaine échéance).
+
+```sh
+private-data_backup.sh timer-shutdown-disable   # retirer le service (root)
+private-data_backup.sh backup-pending           # tenter tout de suite
+```
 
 ## Configuration
 
@@ -147,5 +189,6 @@ d'un coup (code retour 1) : `bash`, `tar`, `find`, `sort`, `awk`, `stat`,
 | `gum` | lancement de l'interface texte |
 | `systemctl` / `systemd` | utilisation des sauvegardes automatiques (`timer-*`) |
 | `loginctl` | contrôle et activation du linger |
-| `pkexec` | `timer-linger` (élévation pour `loginctl enable-linger`) |
+| `pkexec` | `timer-linger`, `timer-shutdown-enable/disable` (élévation) |
+| `notify-send` | notifications de report (facultatif : repli sur le journal) |
 | `awk` | interface texte (mise en forme des tailles) |

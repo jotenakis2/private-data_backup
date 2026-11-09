@@ -12,6 +12,8 @@
 #   private-data_backup.sh timer-add PROFIL quotidien HH:MM
 #   private-data_backup.sh timer-add PROFIL hebdomadaire JOUR HH:MM
 #   private-data_backup.sh timer-list | timer-remove PROFIL | timer-run PROFIL
+#   private-data_backup.sh timer-shutdown-enable | timer-shutdown-disable
+#   private-data_backup.sh backup-pending [--shutdown]
 #   private-data_backup.sh timer-linger
 #   private-data_backup.sh help | --version
 #
@@ -120,6 +122,15 @@ ARCHIVE_FILE=""
 PLAN_FILE=""
 APPLY_PLAN=""
 SYSTEMCTL_BIN="${PRIVATE_BACKUP_SYSTEMCTL:-systemctl}"
+# Sauvegardes reportées à l'extinction (par planification).
+PENDING_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/${SCRIPTNAME}/pending"
+SYSTEM_UNIT_DIR="${PRIVATE_BACKUP_SYSTEM_UNIT_DIR:-/etc/systemd/system}"
+SYSTEM_UNIT_NAME="${SCRIPTNAME}-shutdown.service"
+SESSION_UNIT_NAME="${SCRIPTNAME}-session.service"
+EXTINCTION_SET=0
+EXTINCTION_VAL=0
+SHUTDOWN_RUN=0
+NOTIFY_ENABLED="${PRIVATE_BACKUP_NOTIFY:-1}"
 SNAPSHOT_MODE="auto"
 
 # Archives découvertes : triées par groupe puis date décroissante.
@@ -166,6 +177,19 @@ _log_write() {
 _log() {
 	_log_write "${*}"
 	return 0
+}
+
+# Supprime les .part laissés par une exécution interrompue (SIGKILL à
+# l'extinction, coupure). Appelé avec le verrou tenu : aucun backup actif.
+_cleanup_stale_parts() {
+	local file="" rc=0
+	[[ -d ${NAS_MOUNT} ]] || return 0
+	for file in "${NAS_MOUNT}"/*.part; do
+		[[ -e ${file} ]] || continue
+		_WARN "reste d'archive interrompue supprimé : ${file##*/}"
+		rm -f -- "${file}" || rc=1
+	done
+	return "${rc}"
 }
 
 # Prend le verrou exclusif (une seule instance qui écrit à la fois).
@@ -1169,11 +1193,14 @@ _usage() {
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "encrypt-archives" "${r}" "${d}" "[PROFIL...]" "${r}" "chiffrer les archives en clair (age)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "adopt-orphans" "${r}" "${d}" "[PROFIL...]" "${r}" "réintégrer les profils orphelins (dossier déduit)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-add" "${r}" "${d}" "PROFIL quotidien HH:MM" "${r}" "planifier une sauvegarde (systemd --user)"
-	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "" "${r}" "${d}" "PROFIL hebdomadaire JOUR HH:MM" "${r}" ""
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "" "${r}" "${d}" "PROFIL hebdomadaire JOUR HH:MM" "${r}" "  (--extinction : retenter à l'extinction)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-remove" "${r}" "${d}" "PROFIL" "${r}" "supprimer la planification d'un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-list" "${r}" "${d}" "[--porcelain]" "${r}" "lister les sauvegardes automatiques"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-run" "${r}" "${d}" "PROFIL" "${r}" "lancer la sauvegarde planifiée maintenant"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-sync" "${r}" "${d}" "" "${r}" "régénérer le service des planifications"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-shutdown-enable" "${r}" "${d}" "" "${r}" "installer le service d'extinction (root)"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-shutdown-disable" "${r}" "${d}" "" "${r}" "retirer le service d'extinction (root)"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "backup-pending" "${r}" "${d}" "[--shutdown]" "${r}" "sauvegarder les profils reportés"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-linger" "${r}" "${d}" "" "${r}" "autoriser les timers hors session (root)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-add" "${r}" "${d}" "NOM DOSSIER [BINAIRE] [EXCL]" "${r}" "ajouter ou modifier un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
@@ -1200,6 +1227,8 @@ _usage() {
 --porcelain|sortie tabulée (interfaces) pour show, list et timer-list
 --archive FILE|restaurer cette archive précise (avec restore)
 --config FILE|utiliser ce fichier de configuration
+--extinction|planifier : tenter la sauvegarde à l'extinction si l'application est ouverte
+--no-extinction|planifier : désactiver ce mode
 --plan FILE|écrire le plan d'adoption dans FILE (adopt-orphans)
 --apply-plan FILE|appliquer ce plan sans réanalyser les archives
 --delete-logs|supprimer les journaux (action seule, avec --dry-run/--yes)
@@ -1524,6 +1553,7 @@ _backup_one() {
 	cmd="${COMMANDS[${profil}]:-}"
 	if [[ -n ${cmd} ]] && pgrep -x -- "${cmd}" >/dev/null 2>&1; then
 		_WARN "${profil} : ${cmd} est en cours d'exécution — ferme-le puis relance"
+		_pending_add "${profil}" "${cmd} est en cours d'exécution"
 		return 3
 	fi
 
@@ -1577,6 +1607,7 @@ _backup_one() {
 	bytes="$(_file_size "${target}")"
 	size_h="$(_human_size "${bytes}")"
 	_log "profil ${profil} : terminé, ${bytes} octets (${size_h})"
+	_pending_clear "${profil}"
 	_INFO "${profil} : ${target##*/} (${size_h})"
 	return 0
 }
@@ -1588,6 +1619,7 @@ backup() {
 
 	_check_nas_rw || return 1
 	_check_nas_perms
+	_cleanup_stale_parts
 	_collect_archives
 
 	if ((${#wanted[@]} > 0)); then
@@ -2523,6 +2555,28 @@ _timer_put() {
 	return 0
 }
 
+# Variante de _timer_put : contenu lu sur l'entrée standard.
+_timer_put_stdin() {
+	local path="${1}" dir="" tmp=""
+	dir="${path%/*}"
+	if ! mkdir -p -- "${dir}" 2>/dev/null; then
+		_ERR "dossier d'unités inaccessible : ${dir}"
+		return 1
+	fi
+	tmp="${path}.tmp.$$"
+	if ! cat >"${tmp}" 2>/dev/null; then
+		rm -f -- "${tmp}"
+		_ERR "écriture impossible : ${path}"
+		return 1
+	fi
+	if ! mv -f -- "${tmp}" "${path}"; then
+		rm -f -- "${tmp}"
+		_ERR "écriture impossible : ${path}"
+		return 1
+	fi
+	return 0
+}
+
 # Template de service commun à tous les profils (%i = nom du profil).
 _timer_write_service() {
 	local cfg="${1}" dir="" path="" script="" cfgexec=""
@@ -2549,18 +2603,20 @@ _timer_write_service() {
 # Timer d'un profil. Les métadonnées (fréquence, heure, jour) sont conservées
 # dans un commentaire pour que timer-list n'ait pas à réinterpréter OnCalendar.
 _timer_write_timer() {
-	local name="${1}" freq="${2}" time="${3}" day="${4}" dir="" path="" cal="" desc="" meta="" dayfr=""
+	local name="${1}" freq="${2}" time="${3}" day="${4}" ext="${5:-0}"
+	local dir="" path="" cal="" desc="" meta="" dayfr="" extmeta=""
 	dayfr="$(_timer_day_fr "${day}")"
 	dir="$(_timer_unit_dir)"
 	path="${dir}/$(_timer_unit "${name}")"
+	((ext == 1)) && extmeta=" extinction=1"
 	if [[ ${freq} == "hebdomadaire" ]]; then
 		cal="${day} *-*-* ${time}:00"
 		desc="hebdomadaire (${dayfr})"
-		meta="# private-data-backup: frequence=hebdomadaire heure=${time} jour=${dayfr}"
+		meta="# private-data-backup: frequence=hebdomadaire heure=${time} jour=${dayfr}${extmeta}"
 	else
 		cal="*-*-* ${time}:00"
 		desc="quotidienne"
-		meta="# private-data-backup: frequence=quotidien heure=${time}"
+		meta="# private-data-backup: frequence=quotidien heure=${time}${extmeta}"
 	fi
 	_timer_put "${path}" \
 		"${meta}" \
@@ -2579,7 +2635,7 @@ _timer_write_timer() {
 
 # Métadonnées d'un fichier timer : « fréquence<TAB>heure<TAB>jour ».
 _timer_meta() {
-	local file="${1}" meta="" kv="" key="" val="" freq="?" time="?" day=""
+	local file="${1}" meta="" kv="" key="" val="" freq="?" time="?" day="" ext="0"
 	local -a champs=()
 	meta="$(sed -n 's/^# private-data-backup: //p' "${file}" 2>/dev/null | head -n 1)" || meta=""
 	if [[ -n ${meta} ]]; then
@@ -2591,11 +2647,84 @@ _timer_meta() {
 			frequence) freq="${val}" ;;
 			heure) time="${val}" ;;
 			jour) day="${val}" ;;
+			extinction) ext="${val}" ;;
 			*) ;;
 			esac
 		done
 	fi
-	printf '%s\t%s\t%s' "${freq}" "${time}" "${day}"
+	printf '%s|%s|%s|%s' "${freq}" "${time}" "${day}" "${ext}"
+}
+
+_timer_extinction() {
+	local dir="" file=""
+	dir="$(_timer_unit_dir)"
+	file="${dir}/$(_timer_unit "${1}")"
+	[[ -f ${file} ]] && grep -q 'extinction=1' "${file}" 2>/dev/null
+}
+
+_shutdown_unit_path() {
+	printf '%s/%s' "${SYSTEM_UNIT_DIR}" "${SYSTEM_UNIT_NAME}"
+}
+
+_shutdown_unit_installed() {
+	local path=""
+	path="$(_shutdown_unit_path)"
+	[[ -f ${path} ]]
+}
+
+_session_unit_path() {
+	local dir=""
+	dir="$(_timer_unit_dir)"
+	printf '%s/%s' "${dir}" "${SESSION_UNIT_NAME}"
+}
+
+_session_unit_installed() {
+	local path=""
+	path="$(_session_unit_path)"
+	[[ -f ${path} ]]
+}
+
+# Fin de session graphique (déconnexion) : le gestionnaire utilisateur reste
+# vivant avec linger, mais graphical-session.target s'arrête.
+_session_unit_lines() {
+	local script="" cfg=""
+	script="${SELF_PATH//%/%%}"
+	if [[ -n ${CFG_FILE} ]]; then
+		cfg="$(readlink -f -- "${CFG_FILE}" 2>/dev/null)" || cfg="${CFG_FILE}"
+		cfg="${cfg//%/%%}"
+	fi
+	printf '%s\n' \
+		"[Unit]" \
+		"Description=Sauvegardes private-data_backup en attente (fin de session)" \
+		"PartOf=graphical-session.target" \
+		"" \
+		"[Service]" \
+		"Type=oneshot" \
+		"RemainAfterExit=yes" \
+		"ExecStart=/bin/true" \
+		"ExecStop=\"${script}\"${cfg:+ --config \"${cfg}\"} backup-pending --shutdown" \
+		"Environment=PRIVATE_BACKUP_LOCK_WAIT=7200" \
+		"Environment=PRIVATE_BACKUP_STRICT_SKIP=1" \
+		"TimeoutStopSec=infinity" \
+		"" \
+		"[Install]" \
+		"WantedBy=default.target graphical-session.target"
+	return 0
+}
+
+# Installe le service de fin de session (sans root).
+_session_unit_write() {
+	local path=""
+	path="$(_session_unit_path)"
+	if ! _session_unit_lines | _timer_put_stdin "${path}"; then
+		return 1
+	fi
+	"${SYSTEMCTL_BIN}" --user daemon-reload 2>/dev/null || _WARN "daemon-reload utilisateur a échoué"
+	if ! "${SYSTEMCTL_BIN}" --user enable --now "${SESSION_UNIT_NAME}" 2>&1; then
+		_ERR "activation du service de fin de session impossible"
+		return 1
+	fi
+	return 0
 }
 
 _timer_state() {
@@ -2653,6 +2782,80 @@ _linger_state() {
 	esac
 }
 
+# Notification bureau (best effort) ; sans notify-send, journal seulement.
+_notify() {
+	local title="${1}" body="${2}"
+	((NOTIFY_ENABLED == 1)) || return 0
+	if command -v notify-send >/dev/null 2>&1; then
+		notify-send --app-name="${SCRIPTNAME}" --urgency=normal \
+			--icon=dialog-information "${title}" "${body}" 2>/dev/null || true
+		return 0
+	fi
+	_log "notification : ${title} — ${body}"
+	return 0
+}
+
+_pending_file() {
+	printf '%s/%s' "${PENDING_DIR}" "${1}"
+}
+
+_pending_has() {
+	local file=""
+	file="$(_pending_file "${1}")"
+	[[ -f ${file} ]]
+}
+
+_pending_clear() {
+	local file=""
+	file="$(_pending_file "${1}")"
+	if [[ -e ${file} ]]; then
+		rm -f -- "${file}" 2>/dev/null && _log "attente d'extinction levée : ${1}"
+	fi
+	return 0
+}
+
+_pending_list() {
+	local file=""
+	[[ -d ${PENDING_DIR} ]] || return 0
+	for file in "${PENDING_DIR}"/*; do
+		[[ -f ${file} ]] || continue
+		printf '%s\n' "${file##*/}"
+	done | sort || true
+}
+
+# Marque un profil pour une tentative à l'extinction (si son timer l'autorise).
+_pending_add() {
+	local name="${1}" reason="${2}" file="" tmp="" state=""
+	((DRY_RUN == 1)) && return 0
+	_timer_extinction "${name}" || return 0
+	file="$(_pending_file "${name}")"
+	[[ -f ${file} ]] && return 0
+	state="${PENDING_DIR%/*}"
+	if ! mkdir -p -- "${PENDING_DIR}" 2>/dev/null; then
+		_WARN "${name} : dossier d'attente inaccessible (${PENDING_DIR})"
+		return 1
+	fi
+	chmod 700 -- "${state}" "${PENDING_DIR}" 2>/dev/null || true
+	tmp="${file}.tmp.$$"
+	local now=""
+	now="$(date '+%Y-%m-%d %H:%M:%S')" || now="?"
+	if ! printf '%s\t%s\n' "${now}" "${reason}" >"${tmp}" 2>/dev/null; then
+		rm -f -- "${tmp}"
+		_WARN "${name} : écriture de l'attente impossible"
+		return 1
+	fi
+	chmod 600 -- "${tmp}" 2>/dev/null || true
+	if ! mv -f -- "${tmp}" "${file}"; then
+		rm -f -- "${tmp}"
+		_WARN "${name} : écriture de l'attente impossible"
+		return 1
+	fi
+	_log "sauvegarde reportée à l'extinction : ${name} (${reason})"
+	_notify "Sauvegarde reportée" \
+		"${name} : ${reason}. Elle sera tentée à la fermeture de session."
+	return 0
+}
+
 _timer_need_systemd() {
 	if ! command -v "${SYSTEMCTL_BIN}" >/dev/null 2>&1; then
 		_ERR "systemctl introuvable : les timers nécessitent systemd"
@@ -2674,7 +2877,7 @@ _timer_linger_warn() {
 
 timer_add() {
 	local name="${1:-}" freq="${2:-}" a3="${3:-}" a4="${4:-}"
-	local time="" day="" dayfr="" dir="" path="" unit="" cfg="" rc=0
+	local time="" day="" dayfr="" dir="" path="" unit="" cfg="" rc=0 ext=0
 	name="${name^^}"
 	if ! _known_profile "${name}"; then
 		_ERR "profil inconnu : ${name} (voir show)"
@@ -2706,6 +2909,13 @@ timer_add() {
 	if ! _timer_need_systemd; then
 		return 1
 	fi
+	# Mode extinction : explicite (--extinction/--no-extinction), sinon
+	# conservé tel quel pour une planification existante.
+	ext="${EXTINCTION_VAL}"
+	if ((EXTINCTION_SET == 0)); then
+		ext=0
+		_timer_extinction "${name}" && ext=1
+	fi
 
 	dir="$(_timer_unit_dir)"
 	path="${dir}/$(_timer_unit "${name}")"
@@ -2725,13 +2935,14 @@ timer_add() {
 			_INFO "calendrier : *-*-* ${time}:00"
 		fi
 		_INFO "commandes : ${SYSTEMCTL_BIN} --user daemon-reload && ${SYSTEMCTL_BIN} --user enable --now ${unit}"
+		((ext == 1)) && _INFO "mode extinction : oui (service ${SYSTEM_UNIT_NAME})"
 		return 0
 	fi
 
 	if ! _timer_write_service "${cfg}"; then
 		return 1
 	fi
-	if ! _timer_write_timer "${name}" "${freq}" "${time}" "${day}"; then
+	if ! _timer_write_timer "${name}" "${freq}" "${time}" "${day}" "${ext}"; then
 		return 1
 	fi
 	if ! "${SYSTEMCTL_BIN}" --user daemon-reload 2>/dev/null; then
@@ -2747,6 +2958,14 @@ timer_add() {
 		_OK "${name} : sauvegarde hebdomadaire le ${dayfr} à ${time}"
 	else
 		_OK "${name} : sauvegarde quotidienne à ${time}"
+	fi
+	if ((ext == 1)); then
+		_INFO "mode extinction : les sauvegardes impossibles seront tentées à la fermeture de session"
+		if ! _shutdown_unit_installed || ! _session_unit_installed; then
+			_WARN "services d'extinction incomplets — ${SCRIPTNAME} timer-shutdown-enable"
+		fi
+	else
+		_pending_clear "${name}"
 	fi
 	_INFO "timer actif : ${unit}"
 	_timer_linger_warn
@@ -2797,6 +3016,7 @@ timer_remove() {
 		_WARN "daemon-reload a échoué"
 		rc=1
 	fi
+	_pending_clear "${name}"
 	_OK "${name} : sauvegarde automatique supprimée"
 	return "${rc}"
 }
@@ -2828,7 +3048,7 @@ timer_run() {
 }
 
 timer_list() {
-	local dir="" file="" name="" meta="" freq="" time="" day="" when="" unit="" svc="" st="" next="" res="" n=0
+	local dir="" file="" name="" meta="" freq="" time="" day="" ext="" when="" unit="" svc="" st="" next="" res="" n=0 ext_h=""
 	local -a noms=()
 	dir="$(_timer_unit_dir)"
 	if ! compgen -G "${dir}/${SCRIPTNAME}@*.timer" >/dev/null; then
@@ -2847,7 +3067,7 @@ timer_list() {
 			name="${name#"${SCRIPTNAME}"@}"
 			name="${name%.timer}"
 			meta="$(_timer_meta "${file}")"
-			IFS=$'\t' read -r freq time day <<<"${meta}"
+			IFS='|' read -r freq time day ext <<<"${meta}"
 			when="${time}"
 			[[ ${freq} == "hebdomadaire" ]] && when="${day} ${time}"
 			unit="$(_timer_unit "${name}")"
@@ -2855,19 +3075,22 @@ timer_list() {
 			st="$(_timer_state "${unit}")"
 			next="$(_timer_next "${unit}")"
 			res="$(_timer_result "${svc}")"
-			printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${name}" "${freq}" "${when}" "${next}" "${st}" "${res}"
+			ext_h="non"
+			[[ ${ext} == 1 ]] && ext_h="oui"
+			printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+				"${name}" "${freq}" "${when}" "${next}" "${st}" "${res}" "${ext_h}"
 		done
 		return 0
 	fi
 
-	local -a col_name=() col_freq=() col_next=() col_state=() col_res=()
-	local w_name=6 w_freq=10 w_next=8
+	local -a col_name=() col_freq=() col_next=() col_state=() col_res=() col_ext=()
+	local w_name=6 w_freq=10 w_next=8 w_ext=4
 	for file in "${noms[@]}"; do
 		name="${file##*/}"
 		name="${name#"${SCRIPTNAME}"@}"
 		name="${name%.timer}"
 		meta="$(_timer_meta "${file}")"
-		IFS=$'\t' read -r freq time day <<<"${meta}"
+		IFS='|' read -r freq time day ext <<<"${meta}"
 		when="${time}"
 		[[ ${freq} == "hebdomadaire" ]] && when="${day} ${time}"
 		unit="$(_timer_unit "${name}")"
@@ -2875,23 +3098,30 @@ timer_list() {
 		st="$(_timer_state "${unit}")"
 		next="$(_timer_next "${unit}")"
 		res="$(_timer_result "${svc}")"
+		ext_h="-"
+		[[ ${ext} == 1 ]] && ext_h="oui"
 		col_name+=("${name}")
 		col_freq+=("${freq} ${when}")
 		col_next+=("${next}")
 		col_state+=("${st}")
 		col_res+=("${res}")
+		col_ext+=("${ext_h}")
 		((${#name} > w_name)) && w_name=${#name}
 		((${#freq} + 1 + ${#when} > w_freq)) && w_freq=$((${#freq} + 1 + ${#when}))
 		((${#next} > w_next)) && w_next=${#next}
+		((${#ext_h} > w_ext)) && w_ext=${#ext_h}
 		n=$((n + 1))
 	done
 
-	printf '\n%b%-*s %-*s %-*s %-9s %s%b\n' "${C_BOLD}" "${w_name}" "PROFIL" "${w_freq}" "FRÉQUENCE" "${w_next}" "PROCHAIN" "ÉTAT" "DERNIER" "${C_RESET}"
+	printf '\n%b%-*s %-*s %-*s %-9s %-*s %s%b\n' "${C_BOLD}" \
+		"${w_name}" "PROFIL" "${w_freq}" "FRÉQUENCE" "${w_next}" "PROCHAIN" \
+		"ÉTAT" "${w_ext}" "EXT." "DERNIER" "${C_RESET}"
 	local idx=0
 	for idx in "${!col_name[@]}"; do
-		printf '%-*s %-*s %-*s %-9s %s\n' \
+		printf '%-*s %-*s %-*s %-9s %-*s %s\n' \
 			"${w_name}" "${col_name[${idx}]}" "${w_freq}" "${col_freq[${idx}]}" \
-			"${w_next}" "${col_next[${idx}]}" "${col_state[${idx}]}" "${col_res[${idx}]}"
+			"${w_next}" "${col_next[${idx}]}" "${col_state[${idx}]}" \
+			"${w_ext}" "${col_ext[${idx}]}" "${col_res[${idx}]}"
 	done
 
 	local linger=""
@@ -2905,6 +3135,28 @@ timer_list() {
 		;;
 	*) _WARN "état du linger indéterminé (loginctl indisponible)" ;;
 	esac
+
+	# Profils en attente d'extinction et état du service système.
+	local -a attente=()
+	mapfile -t attente < <(_pending_list || true)
+	if ((${#attente[@]} > 0)); then
+		_INFO "en attente d'extinction : ${attente[*]}"
+	fi
+	local ext_count=0
+	for file in "${noms[@]}"; do
+		name="${file##*/}"
+		name="${name#"${SCRIPTNAME}"@}"
+		name="${name%.timer}"
+		_timer_extinction "${name}" && ext_count=$((ext_count + 1))
+	done
+	if ((ext_count > 0)); then
+		if ! _shutdown_unit_installed || ! _session_unit_installed; then
+			_WARN "mode extinction utilisé mais service incomplet — ${SCRIPTNAME} timer-shutdown-enable"
+		else
+			_INFO "services d'extinction installés (session + système)"
+		fi
+	fi
+
 	# Signale un template obsolète (chemin du script ou mode strict absent).
 	file="${dir}/${SCRIPTNAME}@.service"
 	if [[ -f ${file} ]]; then
@@ -2921,10 +3173,247 @@ timer_list() {
 	return 0
 }
 
+# Exécute les sauvegardes marquées « à l'extinction ».
+# --shutdown : attend la fermeture de l'application (sans limite) au lieu
+# d'abandonner ; utilisé par le service système d'extinction.
+backup_pending() {
+	local -a noms=()
+	local name="" cmd="" r=0 rc=0 done_count=0
+	mapfile -t noms < <(_pending_list || true)
+	if ((${#noms[@]} == 0)); then
+		_INFO "aucune sauvegarde en attente d'extinction"
+		return 0
+	fi
+	if ((SHUTDOWN_RUN == 1)); then
+		STRICT_SKIP=1
+		_INFO "mode extinction : ${#noms[@]} profil(s) en attente"
+	fi
+	for name in "${noms[@]}"; do
+		if ! _known_profile "${name}"; then
+			_WARN "${name} : profil absent de la configuration — attente levée"
+			_pending_clear "${name}"
+			continue
+		fi
+		if ! _timer_extinction "${name}"; then
+			_INFO "${name} : mode extinction désactivé — attente levée"
+			_pending_clear "${name}"
+			continue
+		fi
+		cmd="${COMMANDS[${name}]:-}"
+		if [[ -n ${cmd} ]] && pgrep -x -- "${cmd}" >/dev/null 2>&1; then
+			if ((SHUTDOWN_RUN == 1)); then
+				_notify "Extinction en attente" \
+					"${name} : ${cmd} est encore ouvert. Ferme-le pour permettre la sauvegarde."
+				_INFO "${name} : attente de la fermeture de ${cmd}…"
+				while pgrep -x -- "${cmd}" >/dev/null 2>&1; do
+					sleep 2
+				done
+			else
+				_WARN "${name} : ${cmd} est en cours d'exécution — attente conservée"
+				rc=1
+				continue
+			fi
+		fi
+		backup "${name}"
+		r=$?
+		if ((r == 0)); then
+			_pending_clear "${name}"
+			done_count=$((done_count + 1))
+		else
+			_WARN "${name} : sauvegarde d'extinction non aboutie — attente conservée"
+			rc=1
+		fi
+	done
+	local cn=""
+	cn="$(_count "${done_count}" "sauvegarde effectuée" "sauvegardes effectuées")"
+	_INFO "attente d'extinction : ${cn}"
+	return "${rc}"
+}
+
+# Contenu du service système exécuté à l'extinction.
+_shutdown_unit_lines() {
+	local user="" group="" uid="" home="" cfg="" script="" nas="" mount_unit="" after=""
+	user="$(_timer_user)"
+	group="$(id -gn "${user}" 2>/dev/null)" || group="${user}"
+	uid="$(id -u "${user}" 2>/dev/null)" || uid="${UID}"
+	home="${HOME}"
+	script="${SELF_PATH//%/%%}"
+	if [[ -n ${CFG_FILE} ]]; then
+		cfg="$(readlink -f -- "${CFG_FILE}" 2>/dev/null)" || cfg="${CFG_FILE}"
+		cfg="${cfg//%/%%}"
+	fi
+	nas="${NAS}"
+	mount_unit=""
+	if [[ -n ${nas} ]] && command -v systemd-escape >/dev/null 2>&1; then
+		mount_unit="$(systemd-escape -p --suffix=mount "${nas}" 2>/dev/null)" || mount_unit=""
+	fi
+	after="After=user@${uid}.service user-runtime-dir@${uid}.service"
+	[[ -n ${mount_unit} ]] && after="${after} ${mount_unit}"
+
+	printf '%s\n' \
+		"[Unit]" \
+		"Description=Sauvegardes private-data_backup en attente (extinction)" \
+		"DefaultDependencies=no" \
+		"${after}" \
+		"Before=shutdown.target" \
+		"" \
+		"[Service]" \
+		"Type=oneshot" \
+		"User=${user}" \
+		"Group=${group}" \
+		"Environment=HOME=${home}" \
+		"Environment=XDG_RUNTIME_DIR=/run/user/${uid}" \
+		"Environment=XDG_STATE_HOME=${home}/.local/state" \
+		"Environment=PRIVATE_BACKUP_LOCK_WAIT=7200" \
+		"Environment=PRIVATE_BACKUP_STRICT_SKIP=1" \
+		"ExecStart=\"${script}\"${cfg:+ --config \"${cfg}\"} backup-pending --shutdown" \
+		"TimeoutStartSec=infinity" \
+		"Nice=10" \
+		"IOSchedulingClass=idle" \
+		"" \
+		"[Install]" \
+		"WantedBy=shutdown.target"
+	_log "service d'extinction : NAS=${nas}"
+	return 0
+}
+
+# Installe (root) le service systemd d'extinction.
+timer_shutdown_enable() {
+	local path="" spath="" dir="" tmp="" need_root=0 rc=0 out="" user=""
+	path="$(_shutdown_unit_path)"
+	spath="$(_session_unit_path)"
+	dir="${path%/*}"
+	if ((DRY_RUN == 1)); then
+		_INFO "installerait : ${path}"
+		_INFO "installerait : ${spath}"
+		return 0
+	fi
+	if ! _confirm "Installer le service d'extinction (root) ?"; then
+		_INFO "annulé — service d'extinction non installé"
+		return 3
+	fi
+	[[ -w ${dir} ]] || need_root=1
+	if ((need_root == 1)) && ! command -v pkexec >/dev/null 2>&1; then
+		_ERR "pkexec introuvable : installe ${path} en root puis « systemctl enable ${SYSTEM_UNIT_NAME} »"
+		return 1
+	fi
+	if ! _session_unit_write; then
+		_ERR "service de fin de session non installé"
+		return 1
+	fi
+	tmp="$(mktemp)" || return 1
+	if ! _shutdown_unit_lines >"${tmp}"; then
+		rm -f -- "${tmp}"
+		return 1
+	fi
+	chmod 644 -- "${tmp}" 2>/dev/null || true
+	if ((need_root == 1)); then
+		if ! out="$(pkexec install -m 0644 -o root -g root "${tmp}" "${path}" 2>&1)"; then
+			_ERR "installation du service refusée ou impossible"
+			[[ -n ${out} ]] && printf '%s\n' "${out}" >&2
+			rm -f -- "${tmp}"
+			return 1
+		fi
+		rm -f -- "${tmp}"
+		if ! pkexec "${SYSTEMCTL_BIN}" daemon-reload 2>/dev/null; then
+			_WARN "daemon-reload a échoué"
+			rc=1
+		fi
+		if ! pkexec "${SYSTEMCTL_BIN}" enable "${SYSTEM_UNIT_NAME}" 2>&1; then
+			_ERR "activation du service d'extinction impossible"
+			return 1
+		fi
+	else
+		if ! install -m 0644 -- "${tmp}" "${path}" 2>/dev/null; then
+			_ERR "écriture impossible : ${path}"
+			rm -f -- "${tmp}"
+			return 1
+		fi
+		rm -f -- "${tmp}"
+		if ! "${SYSTEMCTL_BIN}" daemon-reload 2>/dev/null; then
+			_WARN "daemon-reload a échoué"
+			rc=1
+		fi
+		if ! "${SYSTEMCTL_BIN}" enable "${SYSTEM_UNIT_NAME}" 2>&1; then
+			_ERR "activation du service d'extinction impossible"
+			return 1
+		fi
+	fi
+	user="$(_timer_user)"
+	_OK "service d'extinction installé : ${path}"
+	_OK "service de fin de session installé : ${spath}"
+	_INFO "exécution à la fin de session et à l'extinction, en tant que ${user}"
+	return "${rc}"
+}
+
+timer_shutdown_disable() {
+	local path="" spath="" dir="" need_root=0 rc=0
+	path="$(_shutdown_unit_path)"
+	spath="$(_session_unit_path)"
+	dir="${path%/*}"
+	if ! [[ -f ${path} ]] && ! _session_unit_installed; then
+		_INFO "service d'extinction déjà absent"
+		return 0
+	fi
+	if ((DRY_RUN == 1)); then
+		_INFO "désactiverait et supprimerait ${path}"
+		return 0
+	fi
+	if ! _confirm "Retirer les services d'extinction (root) ?"; then
+		_INFO "annulé — service inchangé"
+		return 3
+	fi
+	# Service de fin de session (utilisateur, sans root).
+	if _session_unit_installed; then
+		"${SYSTEMCTL_BIN}" --user disable "${SESSION_UNIT_NAME}" 2>/dev/null || _WARN "désactivation du service de session incomplète"
+		rm -f -- "${spath}" 2>/dev/null || _WARN "suppression du service de session impossible"
+		"${SYSTEMCTL_BIN}" --user daemon-reload 2>/dev/null || rc=1
+	fi
+	if [[ ! -f ${path} ]]; then
+		_OK "service d'extinction retiré"
+		return "${rc}"
+	fi
+	[[ -w ${dir} ]] || need_root=1
+	if ((need_root == 1)); then
+		if ! command -v pkexec >/dev/null 2>&1; then
+			_ERR "pkexec introuvable : retire ${path} en root puis « systemctl disable ${SYSTEM_UNIT_NAME} »"
+			return 1
+		fi
+		pkexec "${SYSTEMCTL_BIN}" disable "${SYSTEM_UNIT_NAME}" 2>/dev/null || _WARN "désactivation incomplète"
+		if ! pkexec rm -f -- "${path}" 2>&1; then
+			_ERR "suppression impossible : ${path}"
+			return 1
+		fi
+		pkexec "${SYSTEMCTL_BIN}" daemon-reload 2>/dev/null || rc=1
+	else
+		"${SYSTEMCTL_BIN}" disable "${SYSTEM_UNIT_NAME}" 2>/dev/null || _WARN "désactivation incomplète"
+		if ! rm -f -- "${path}"; then
+			_ERR "suppression impossible : ${path}"
+			return 1
+		fi
+		"${SYSTEMCTL_BIN}" daemon-reload 2>/dev/null || rc=1
+	fi
+	_OK "service d'extinction retiré"
+	local diru="" file="" name=""
+	diru="$(_timer_unit_dir)"
+	local reste=0
+	for file in "${diru}/${SCRIPTNAME}"@*.timer; do
+		[[ -f ${file} ]] || continue
+		name="${file##*/}"
+		name="${name#"${SCRIPTNAME}"@}"
+		name="${name%.timer}"
+		_timer_extinction "${name}" && reste=$((reste + 1))
+	done
+	if ((reste > 0)); then
+		_WARN "${reste} planification(s) utilisent encore le mode extinction"
+	fi
+	return "${rc}"
+}
+
 # Réécrit le template de service (chemin du script, config, réglages) sans
 # toucher aux planifications. Utile après mise à jour de l'outil.
 timer_sync() {
-	local dir="" path="" cfg="" rc=0
+	local dir="" path="" cfg="" rc=0 syspath=""
 	dir="$(_timer_unit_dir)"
 	if ! compgen -G "${dir}/${SCRIPTNAME}@*.timer" >/dev/null; then
 		_INFO "aucune planification à mettre à jour"
@@ -2950,6 +3439,16 @@ timer_sync() {
 	fi
 	_OK "service mis à jour : ${path}"
 	_INFO "les planifications existantes sont conservées"
+	if _session_unit_installed; then
+		_session_unit_write || rc=1
+		_INFO "service de fin de session mis à jour"
+	fi
+	if _shutdown_unit_installed; then
+		syspath="$(_shutdown_unit_path)"
+		if ! grep -qF "${SELF_PATH//%/%%}" "${syspath}" 2>/dev/null; then
+			_WARN "le service d'extinction pointe vers un autre chemin — relance ${SCRIPTNAME} timer-shutdown-enable"
+		fi
+	fi
 	return "${rc}"
 }
 
@@ -3053,6 +3552,7 @@ profile_remove() {
 	if _timer_exists "${name}"; then
 		_WARN "sauvegarde automatique toujours active : ${SCRIPTNAME} timer-remove ${name}"
 	fi
+	_pending_clear "${name}"
 	_WARN "${name} retiré ; ses archives restent sur le NAS (orphelines : delete_old --purge-orphans)"
 	return 0
 }
@@ -3376,6 +3876,9 @@ main() {
 		--purge-orphans) PURGE_ORPHANS=1 ;;
 		--delete-logs)   DELETE_LOGS=1 ;;
 		--porcelain)     PORCELAIN=1 ;;
+		--extinction)    EXTINCTION_SET=1; EXTINCTION_VAL=1 ;;
+		--no-extinction) EXTINCTION_SET=1; EXTINCTION_VAL=0 ;;
+		--shutdown)      SHUTDOWN_RUN=1 ;;
 		--archive)       shift; ARCHIVE_FILE="${1:-}" ;;
 		--plan)          shift; PLAN_FILE="${1:-}" ;;
 		--plan=*)        PLAN_FILE="${1#*=}" ;;
@@ -3418,7 +3921,7 @@ main() {
 	fi
 
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-list|timer-run|timer-sync|timer-linger|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
+	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-list|timer-run|timer-sync|timer-linger|timer-shutdown-enable|timer-shutdown-disable|backup-pending|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
 	*)
 		_ERR "commande inconnue : ${cmd}"
 		printf '\n' >&2
@@ -3426,6 +3929,11 @@ main() {
 		return 2
 		;;
 	esac
+
+	if ((SHUTDOWN_RUN == 1)) && [[ ${cmd} != "backup-pending" ]]; then
+		_ERR "--shutdown ne s'utilise qu'avec backup-pending"
+		return 2
+	fi
 
 	# --delete-logs est une action autonome.
 	if ((DELETE_LOGS == 1)); then
@@ -3484,7 +3992,7 @@ main() {
 	# Les commandes de consultation (`show`, `list`, `config-path`…) sont
 	# appelées en boucle par la TUI : elles ne créent pas de journal.
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-run|timer-sync|timer-linger|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
+	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-run|timer-sync|timer-linger|timer-shutdown-enable|timer-shutdown-disable|backup-pending|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
 	*) LOG_RUN=0 ;;
 	esac
 	if ((LOG_RUN == 1)); then
@@ -3504,7 +4012,7 @@ main() {
 	# pourraient produire deux archives concurrentes, et delete_old pourrait
 	# supprimer une archive en cours d'écriture).
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|profile-add|profile-remove|config-set)
+	backup|backup-pending|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|profile-add|profile-remove|config-set)
 		needs_lock=1
 		;;
 	*) needs_lock=0 ;;
@@ -3577,6 +4085,18 @@ main() {
 		;;
 	timer-sync)
 		timer_sync
+		rc=$?
+		;;
+	timer-shutdown-enable)
+		timer_shutdown_enable
+		rc=$?
+		;;
+	timer-shutdown-disable)
+		timer_shutdown_disable
+		rc=$?
+		;;
+	backup-pending)
+		backup_pending
 		rc=$?
 		;;
 	timer-linger)

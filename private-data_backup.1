@@ -87,7 +87,7 @@ est déduit de l'archive la plus récente (une racine unique est exigée), puis
 .BR SOURCES .
 Les chevauchements de dossiers entre profils sont signalés.
 .TP
-.B timer-add \fIPROFIL quotidien HH:MM\fR
+.B timer-add \fIPROFIL quotidien HH:MM \fR[\fB\-\-extinction\fR|\fB\-\-no\-extinction\fR]
 Programme une sauvegarde automatique quotidienne avec un timer systemd
 utilisateur (aucun privilège root). Un service modèle
 .IR private\-data\_backup@.service
@@ -98,6 +98,12 @@ ouverte, source absente) fait échouer le service, visible dans
 .B timer-list
 et
 .BR "systemctl --user \-\-failed" .
+Avec
+.BR \-\-extinction ,
+une sauvegarde impossible est reportée (notification bureau) et retentée à la
+fermeture de session, à l'extinction ou au redémarrage, via le service système
+installé par
+.BR timer-shutdown-enable .
 .TP
 .B timer-add \fIPROFIL hebdomadaire JOUR HH:MM\fR
 Idem, une fois par semaine ; JOUR accepte lundi…dimanche (ou Mon…Sun).
@@ -120,6 +126,26 @@ timer).
 Régénère le service partagé des planifications (chemin absolu du script,
 fichier de configuration, attente du verrou, mode strict) sans toucher aux
 horaires. À lancer après une mise à jour de l'outil.
+.TP
+.B timer-shutdown-enable
+Installe (root, via
+.BR pkexec )
+le service utilisateur
+.I private\-data\_backup\-session.service
+(fin de session graphique) et le service système
+.I private\-data\_backup\-shutdown.service
+(extinction, redémarrage). Les deux exécutent
+.B backup-pending \-\-shutdown
+en tant qu'utilisateur et ne sont pas soumis à la limite d'arrêt de session.
+.TP
+.B timer-shutdown-disable
+Désactive et supprime ce service système (root).
+.TP
+.B backup-pending \fR[\fB\-\-shutdown\fR]
+Exécute les sauvegardes reportées. Avec
+.BR \-\-shutdown ,
+attend la fermeture de l'application surveillée (sans limite) avant de
+sauvegarder ; utilisé par le service d'extinction.
 .TP
 .B timer-linger
 Autorise les timers à tourner même sans session ouverte, via
@@ -177,6 +203,16 @@ Forcer l'instantané avant restauration.
 .TP
 .B \-\-no\-snapshot
 Interdire l'instantané avant restauration.
+.TP
+.B \-\-extinction
+Avec
+.BR timer-add ,
+retenter la sauvegarde à l'extinction si l'application est ouverte.
+.TP
+.B \-\-no\-extinction
+Avec
+.BR timer-add ,
+désactiver ce mode pour la planification.
 .TP
 .B \-\-porcelain
 Sortie tabulée stable, destinée aux interfaces
@@ -245,6 +281,15 @@ Timer d'un profil (OnCalendar, Persistent).
 .TP
 .B ~/.config/systemd/user/private\-data\_backup@\fIPROFIL\fR.service
 Instance du service créée par systemd pour le timer.
+.TP
+.B /etc/systemd/system/private\-data\_backup\-shutdown.service
+Service système optionnel exécuté à l'extinction (mode extinction).
+.TP
+.B ~/.config/systemd/user/private\-data\_backup\-session.service
+Service utilisateur optionnel exécuté à la fin de la session graphique.
+.TP
+.B ~/.local/state/private\-data\_backup/pending/
+Profils en attente de la sauvegarde d'extinction.
 .TP
 .BR "$XDG_RUNTIME_DIR/private\-data\_backup.\fIUID\fR.lock"
 Verrou d'exclusion mutuelle.
