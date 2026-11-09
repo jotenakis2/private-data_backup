@@ -2306,7 +2306,13 @@ encrypt_archives() {
 	done
 
 	if ((${#cibles[@]} == 0)); then
-		_INFO "aucune archive en clair à chiffrer"
+		if ((${#filtres[@]} > 0)); then
+			_INFO "aucune archive en clair pour : ${filtres[*]}"
+		elif ((${#ARCH_PATH[@]} == 0)); then
+			_INFO "aucune archive sur le stockage"
+		else
+			_INFO "toutes les archives sont déjà chiffrées (${#ARCH_PATH[@]} archive(s))"
+		fi
 		return 0
 	fi
 	total_h="$(_human_size "${total}")"

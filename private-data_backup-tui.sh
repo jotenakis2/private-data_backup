@@ -32,6 +32,7 @@ readonly ICON_QUIT=$'\uf011'
 readonly ICON_SNAP=$'\uf0c5'
 readonly ICON_EMPTY=$'\uf114'
 readonly ICON_WARN=$'\uf071'
+readonly ICON_CHECK=$'\uf00c'
 readonly ICON_PLUS=$'\uf067'
 readonly ICON_EDIT=$'\uf044'
 readonly ICON_TRASH=$'\uf1f8'
@@ -516,8 +517,13 @@ _archives_encrypt() {
 		esac
 	done
 	if ((clair == 0)); then
-		gum style --border rounded --padding "0 2" --foreground 3 \
-			"${ICON_EMPTY}  Aucune archive en clair à chiffrer."
+		if ((${#A_PATH[@]} == 0)); then
+			gum style --border rounded --padding "0 2" --foreground 3 \
+				"${ICON_EMPTY}  Aucune archive sur le stockage."
+		else
+			gum style --border rounded --padding "0 2" --foreground 2 \
+				"${ICON_CHECK}  Toutes les archives sont déjà chiffrées (${#A_PATH[@]} archive(s))."
+		fi
 		return 0
 	fi
 	printf '\n'
