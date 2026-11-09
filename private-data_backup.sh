@@ -1080,6 +1080,7 @@ OPTS
 	printf '%b%-13s%b : %s\n' "${c}" "Stockage" "${r}" "${NAS_MOUNT:-${NAS}/${BACKUP_SUBDIR}}"
 	printf '%b%-13s%b : %s\n' "${c}" "Secrets" "${r}" "archives et journaux 0600, dossiers 0700 (umask 077)"
 	printf '%b%-13s%b : %s\n' "${c}" "Journaux" "${r}" "${HOME}/.local/share/${SCRIPTNAME}"
+	printf '%b%-13s%b : %s\n' "${c}" "Interface" "${r}" "private-data_backup-tui.sh (interface texte, gum)"
 	printf '\n'
 	return 0
 }

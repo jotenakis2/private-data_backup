@@ -36,6 +36,11 @@ sont conservés sur place avec le suffixe
 .PP
 Un verrou exclusif empêche deux exécutions qui écrivent de se chevaucher.
 Les opérations destructrices demandent une confirmation.
+.PP
+Une interface texte,
+.BR private-data_backup-tui.sh ,
+permet d'effectuer ces opérations de façon interactive (voir
+.BR "INTERFACE TEXTE" ).
 .SH COMMANDES
 .TP
 .B backup \fR[\fIPROFIL\fR...]
@@ -210,6 +215,25 @@ Liste les journaux qui seraient supprimés.
 .B private\-data\_backup\-tui.sh
 Interface texte : sauvegarder, restaurer, agir sur les archives, gérer les
 profils et la configuration.
+.SH "INTERFACE TEXTE"
+.B private-data_backup-tui.sh
+fournit une interface interactive construite sur
+.BR gum .
+Elle couvre : sauvegarder des profils (sélection multiple), restaurer une
+archive avec choix de l'instantané, agir sur les archives (voir, restaurer une
+version précise, vérifier, supprimer, rétention, purge des orphelins),
+gérer les profils (ajout, modification, retrait) et la configuration
+(destination, rétention, instantanés, chiffrement, journalisation), et
+afficher une description de l'outil.
+.PP
+Aucune logique n'y est dupliquée : vérification d'intégrité, instantanés,
+confirmations, verrou et codes de retour restent gérés par
+.BR private-data_backup.sh .
+Elle requiert
+.B gum
+et
+.BR awk ,
+ainsi que le script principal dans le même dossier.
 .SH SÉCURITÉ
 Archives et journaux en 0600, dossiers en 0700
 .RB ( umask " 077)."
@@ -221,6 +245,8 @@ dans la configuration. Les confirmations et le verrou ne peuvent être
 contournés qu'explicitement
 .RB ( \-\-yes ).
 .SH "VOIR AUSSI"
+.BR private-data_backup-tui.sh ,
+.BR gum (1),
 .BR tar (1),
 .BR gpg (1),
 .BR findmnt (8),
