@@ -42,6 +42,10 @@ readonly ICON_CONFIG=$'\uf013'
 
 # Profils (`show --porcelain`).
 declare -a P_NAME=() P_SRC=() P_CMD=() P_ARCH=() P_DATE=() P_SIZE=() P_EXCL=()
+# Largeurs d'affichage calculées au chargement (alignement garanti).
+P_NAME_W=6
+P_SRC_W=20
+P_CMD_W=12
 
 # Archives (`list --porcelain`).
 declare -a A_GROUP=() A_DATE=() A_SIZE=() A_PATH=()
@@ -211,6 +215,15 @@ _load() {
 		P_SIZE+=("${f}")
 		P_EXCL+=("${g}")
 	done
+
+	P_NAME_W=6
+	P_SRC_W=20
+	P_CMD_W=12
+	for i in "${!P_NAME[@]}"; do
+		((${#P_NAME[${i}]} > P_NAME_W)) && P_NAME_W=${#P_NAME[${i}]}
+		((${#P_SRC[${i}]} > P_SRC_W)) && P_SRC_W=${#P_SRC[${i}]}
+		((${#P_CMD[${i}]} > P_CMD_W)) && P_CMD_W=${#P_CMD[${i}]}
+	done
 	return 0
 }
 
@@ -282,11 +295,13 @@ _label() {
 	if [[ -n ${P_ARCH[${i}]} ]]; then
 		when="$(_fmt_dt "${P_DATE[${i}]}")"
 		size="$(_human "${P_SIZE[${i}]}")"
-		line="$(printf '%-14s %-30s %-12s %s  (%s)' \
-			"${P_NAME[${i}]}" "${P_SRC[${i}]}" "${cmd}" "${when}" "${size}")"
+		line="$(printf '%-*s %-*s %-*s %s  (%s)' \
+			"${P_NAME_W}" "${P_NAME[${i}]}" "${P_SRC_W}" "${P_SRC[${i}]}" \
+			"${P_CMD_W}" "${cmd}" "${when}" "${size}")"
 	else
-		line="$(printf '%-14s %-30s %-12s %s' \
-			"${P_NAME[${i}]}" "${P_SRC[${i}]}" "${cmd}" "aucune archive")"
+		line="$(printf '%-*s %-*s %-*s %s' \
+			"${P_NAME_W}" "${P_NAME[${i}]}" "${P_SRC_W}" "${P_SRC[${i}]}" \
+			"${P_CMD_W}" "${cmd}" "aucune archive")"
 	fi
 	printf '%s' "${line}"
 }
