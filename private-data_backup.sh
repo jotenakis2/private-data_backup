@@ -1077,7 +1077,7 @@ _usage() {
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "show" "${r}" "${d}" "" "${r}" "profils et dernière archive"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "list" "${r}" "${d}" "[PROFIL]" "${r}" "lister les archives"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "verify" "${r}" "${d}" "FICHIER" "${r}" "vérifier l'intégrité d'une archive"
-	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "delete-archive" "${r}" "${d}" "FICHIER" "${r}" "supprimer une archive"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "delete-archive" "${r}" "${d}" "FICHIER..." "${r}" "supprimer des archives"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-add" "${r}" "${d}" "NOM DOSSIER [BINAIRE] [EXCL]" "${r}" "ajouter ou modifier un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-set" "${r}" "${d}" "CLE=VALEUR..." "${r}" "modifier des paramètres"
@@ -2066,28 +2066,41 @@ verify() {
 }
 
 delete_archive() {
-	local f="${1:-}" rc=0
-	if [[ -z ${f} ]]; then
-		_ERR "usage : delete-archive FICHIER"
+	local -a files=("${@}")
+	local f rc=0
+	if ((${#files[@]} == 0)); then
+		_ERR "usage : delete-archive FICHIER..."
 		return 2
 	fi
 	_check_nas_rw || return 1
-	_ensure_in_nas "${f}" || return 1
-	if [[ ! -f ${f} ]]; then
-		_ERR "fichier absent : ${f}"
-		return 1
-	fi
+	# Tout valider avant d'effacer quoi que ce soit.
+	for f in "${files[@]}"; do
+		_ensure_in_nas "${f}" || return 1
+		if [[ ! -f ${f} ]]; then
+			_ERR "fichier absent : ${f}"
+			return 1
+		fi
+	done
 	if ((DRY_RUN == 1)); then
-		_INFO "serait supprimé : ${f##*/}"
+		for f in "${files[@]}"; do
+			_INFO "serait supprimé : ${f##*/}"
+		done
 		return 0
 	fi
-	if ! _confirm "Supprimer définitivement ${f##*/} ?"; then
+	if ((${#files[@]} > 1)); then
+		for f in "${files[@]}"; do
+			_INFO "à supprimer : ${f##*/}"
+		done
+	fi
+	if ! _confirm "Supprimer définitivement ${#files[@]} fichier(s) ?"; then
 		_INFO "annulé — rien n'a été supprimé"
 		return 0
 	fi
-	if ! _RUN "Suppression de ${f##*/}" rm -f -- "${f}"; then
-		rc=1
-	fi
+	for f in "${files[@]}"; do
+		if ! _RUN "Suppression de ${f##*/}" rm -f -- "${f}"; then
+			rc=1
+		fi
+	done
 	return "${rc}"
 }
 
@@ -2597,7 +2610,7 @@ main() {
 		rc=$?
 		;;
 	delete-archive)
-		delete_archive "${positional[0]:-}"
+		delete_archive "${positional[@]}"
 		rc=$?
 		;;
 	profile-add)

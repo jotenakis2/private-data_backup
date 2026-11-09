@@ -48,6 +48,7 @@ declare -a A_GROUP=() A_DATE=() A_SIZE=() A_PATH=()
 # Sélections courantes.
 PICK_FILE=""
 PICK_GROUP=""
+PICK_FILES=()
 
 # Valeurs de configuration (écran Configuration).
 CFG_NAS=""
@@ -438,14 +439,60 @@ _archives_verify() {
 	return 0
 }
 
+# Sélection multiple d'archives (x pour cocher) ; renseigne PICK_FILES.
+_pick_archives() {
+	local -a labels=()
+	local i pick line
+	PICK_FILES=()
+	if ! _load_archives; then
+		gum style --border rounded --padding "0 2" --foreground 1 "${ICON_WARN}  Liste indisponible (NAS monté ?)"
+		return 1
+	fi
+	if ((${#A_PATH[@]} == 0)); then
+		gum style --border rounded --padding "0 2" --foreground 3 "${ICON_EMPTY}  Aucune archive."
+		return 1
+	fi
+	for i in "${!A_PATH[@]}"; do
+		labels+=("$(_archive_label "${i}")")
+	done
+	pick="$(gum choose --no-limit --height 15 \
+		--header "${ICON_TRASH}  Supprimer — x pour cocher, entrée pour valider" \
+		--cursor "❯ " "${labels[@]}")" || return 1
+	[[ -z ${pick} ]] && return 1
+	while IFS= read -r line; do
+		[[ -n ${line} ]] || continue
+		for i in "${!labels[@]}"; do
+			if [[ ${labels[${i}]} == "${line}" ]]; then
+				PICK_FILES+=("${A_PATH[${i}]}")
+				break
+			fi
+		done
+	done <<<"${pick}"
+	((${#PICK_FILES[@]} > 0)) || return 1
+	return 0
+}
+
 _archives_delete() {
-	_pick_archive || return 0
+	local -a disps=()
+	local f i total=0 total_h=""
+	_pick_archives || return 0
+	for f in "${PICK_FILES[@]}"; do
+		disps+=("  - ${f##*/}")
+		for i in "${!A_PATH[@]}"; do
+			if [[ ${A_PATH[${i}]} == "${f}" ]]; then
+				total=$((total + A_SIZE[i]))
+				break
+			fi
+		done
+	done
+	total_h="$(_human "${total}")"
+	gum style --border rounded --padding "0 2" "Suppression" "" "${disps[@]}" "" "total : ${total_h}"
 	if ! gum confirm --default=false --affirmative "Supprimer" --negative "Annuler" \
-		"Supprimer définitivement ${PICK_FILE##*/} ?"; then
+		"Supprimer définitivement ${#PICK_FILES[@]} archive(s) ?"; then
 		return 0
 	fi
 	printf '\n'
-	"${CLI}" delete-archive "${PICK_FILE}" --yes
+	"${CLI}" delete-archive "${PICK_FILES[@]}" --yes
 	_pause
 	return 0
 }
@@ -495,7 +542,7 @@ _screen_archives() {
 			"${ICON_EYE}  Voir les archives" \
 			"Restaurer une version" \
 			"Vérifier une archive" \
-			"Supprimer une archive" \
+			"Supprimer des archives" \
 			"Appliquer la politique de rétention" \
 			"Purger les profils orphelins" \
 			"Retour")" || return 0
@@ -937,8 +984,8 @@ main() {
 		printf '\nÉcrans\n'
 		printf '  %-16s %s\n' "Sauvegarder"   "choisir des profils et lancer une sauvegarde"
 		printf '  %-16s %s\n' "Restaurer"     "restaurer la dernière archive, avec ou sans instantané"
-		printf '  %-16s %s\n' "Archives"      "voir, restaurer une version, vérifier, supprimer,"
-		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
+		printf '  %-16s %s\n' "Archives"      "voir, restaurer une version, vérifier, supprimer (x pour"
+		printf '  %-16s %s\n' ""              "cocher plusieurs archives), rétention, purge des orphelins"
 		printf '  %-16s %s\n' "Profils"       "ajouter, modifier ou retirer un profil"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
 		printf '  %-16s %s\n' "Description"   "présentation de l'outil"
