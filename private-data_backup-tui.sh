@@ -502,7 +502,7 @@ _screen_archives() {
 		case "${action}" in
 		*Voir*)
 			printf '\n'
-			"${CLI}" list 2>&1 | gum pager
+			"${CLI}" list 2>&1 | gum pager --show-line-numbers=false
 			# En quittant le pager, on revient au menu : ses possibilités
 			# sont réaffichées.
 			;;
@@ -681,7 +681,7 @@ _screen_about() {
 		storage="(non défini)"
 	fi
 
-	gum pager <<EOF
+	gum pager --show-line-numbers=false <<EOF
 Private data backup v${APP_VER}
 ==============================
 
