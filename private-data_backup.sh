@@ -94,6 +94,7 @@ FAILURES=0
 INTERRUPTED=0
 LOG_RUN=0
 needs_lock=0
+DELETE_LOGS=0
 
 DRY_RUN=0
 ASSUME_YES=0
@@ -149,6 +150,65 @@ _log_write() {
 _log() {
 	_log_write "${*}"
 	return 0
+}
+
+# Prend le verrou exclusif (une seule instance qui écrit à la fois).
+_acquire_lock() {
+	_need flock || return 1
+	local lock_file="${XDG_RUNTIME_DIR:-/tmp}/${SCRIPTNAME}.${UID}.lock"
+	if ! exec 9>"${lock_file}"; then
+		_ERR "impossible d'ouvrir le verrou ${lock_file}"
+		return 1
+	fi
+	if ! flock -n 9; then
+		_ERR "une autre instance de ${SCRIPTNAME} est déjà en cours (${lock_file})"
+		return 1
+	fi
+	return 0
+}
+
+# Supprime les journaux de ~/.local/share/$SCRIPTNAME (--delete-logs).
+delete_logs() {
+	local dir="${HOME}/.local/share/${SCRIPTNAME}"
+	local f sz=0 total=0 rc=0 human=""
+	local -a files=()
+
+	if [[ ! -d ${dir} ]]; then
+		_INFO "aucun journal (${dir} absent)"
+		return 0
+	fi
+	mapfile -t files < <(find "${dir}" -maxdepth 1 -type f -name "${SCRIPTNAME}-*.log" -print 2>/dev/null || true)
+	if ((${#files[@]} == 0)); then
+		_INFO "aucun journal à supprimer dans ${dir}"
+		return 0
+	fi
+
+	for f in "${files[@]}"; do
+		sz="$(_file_size "${f}")"
+		total=$((total + sz))
+	done
+	human="$(_human_size "${total}")"
+
+	if ((DRY_RUN == 1)); then
+		for f in "${files[@]}"; do
+			_INFO "serait supprimé : ${f##*/}"
+		done
+		_INFO "${#files[@]} journal(aux), ${human} — --dry-run, rien n'a été supprimé"
+		return 0
+	fi
+
+	if ! _confirm "Supprimer ${#files[@]} journal(aux) de ${dir} (${human}) ?"; then
+		_INFO "annulé — rien n'a été supprimé"
+		return 0
+	fi
+
+	for f in "${files[@]}"; do
+		if ! _RUN "Suppression de ${f##*/}" rm -f -- "${f}"; then
+			rc=1
+		fi
+	done
+	printf '\n'
+	return "${rc}"
 }
 
 _init_log() {
@@ -248,7 +308,7 @@ _cfg_needed() {
 			i=$((i + 1))
 			continue
 			;;
-		help|--help|-h|-help|--version|-V) return 1 ;;
+		help|--help|-h|-help|--version|-V|--delete-logs) return 1 ;;
 		*) ;;
 		esac
 		i=$((i + 1))
@@ -968,6 +1028,7 @@ Usage :
   ${C_GREEN}${0} profile-remove${C_RESET} NOM
   ${C_GREEN}${0} config-set${C_RESET} CLE=VALEUR [CLE=VALEUR...]   (NAS, rétention, chiffrement…)
   ${C_GREEN}${0} config-path | config-check
+  ${C_GREEN}${0} --delete-logs [--dry-run] [--yes]
   ${C_GREEN}${0} help | --version
 
 Options :
@@ -988,6 +1049,7 @@ EOF
 --porcelain|sortie tabulée (interfaces) pour show et list
 --archive FILE|restaurer cette archive précise (avec restore)
 --config FILE|utiliser ce fichier de configuration
+--delete-logs|supprimer les journaux (action seule, avec --dry-run/--yes)
 OPTS
 
 	local conf_affichee="${CFG_FILE}"
@@ -2298,6 +2360,7 @@ main() {
 		--no-verify)   VERIFY=0 ;;
 		--orphans)       ORPHANS=1 ;;
 		--purge-orphans) PURGE_ORPHANS=1 ;;
+		--delete-logs)   DELETE_LOGS=1 ;;
 		--porcelain)     PORCELAIN=1 ;;
 		--archive)       shift; ARCHIVE_FILE="${1:-}" ;;
 		--archive=*)     ARCHIVE_FILE="${1#*=}" ;;
@@ -2345,6 +2408,18 @@ main() {
 		return 2
 		;;
 	esac
+
+	# --delete-logs est une action autonome.
+	if ((DELETE_LOGS == 1)); then
+		if [[ -n ${cmd} ]]; then
+			_ERR "--delete-logs s'utilise seul (sans commande)"
+			return 2
+		fi
+		_need find stat awk rm || return 1
+		_acquire_lock || return 1
+		delete_logs
+		return "${?}"
+	fi
 
 	if [[ -z ${cmd} ]]; then
 		_usage >&2
@@ -2423,16 +2498,7 @@ main() {
 	*) needs_lock=0 ;;
 	esac
 	if ((needs_lock == 1)); then
-		_need flock || return 1
-		local lock_file="${XDG_RUNTIME_DIR:-/tmp}/${SCRIPTNAME}.${UID}.lock"
-		if ! exec 9>"${lock_file}"; then
-			_ERR "impossible d'ouvrir le verrou ${lock_file}"
-			return 1
-		fi
-		if ! flock -n 9; then
-			_ERR "une autre instance de ${SCRIPTNAME} est déjà en cours (${lock_file})"
-			return 1
-		fi
+		_acquire_lock || return 1
 	fi
 
 	if ((PORCELAIN == 1)); then
