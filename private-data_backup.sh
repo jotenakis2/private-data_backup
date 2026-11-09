@@ -64,7 +64,6 @@ AGE_IDENTITY=""
 # le fichier) pour qu'il puisse faire de simples affectations.
 declare -A SOURCES=()
 declare -A COMMANDS=()
-declare -A SERVICES=()
 declare -A EXCLUDES=()
 
 # Fichier de configuration effectivement chargé.
@@ -87,7 +86,6 @@ SPIN_FRAMES=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
 LOG_FILE=""
 CHILD_PID=0
 PART_FILE=""
-SERVICES_STOPPED=()
 RUN_DATE=""
 NAS_MOUNT=""
 FAILURES=0
@@ -466,9 +464,6 @@ _config_validate() {
 	for k in "${!COMMANDS[@]}"; do
 		_known_profile "${k}" || _WARN "COMMANDS[${k}] : profil absent de SOURCES (ignoré)"
 	done
-	for k in "${!SERVICES[@]}"; do
-		_known_profile "${k}" || _WARN "SERVICES[${k}] : profil absent de SOURCES (ignoré)"
-	done
 	for k in "${!EXCLUDES[@]}"; do
 		_known_profile "${k}" || _WARN "EXCLUDES[${k}] : profil absent de SOURCES (ignoré)"
 	done
@@ -538,7 +533,7 @@ _dq() {
 	printf '%s' "${v}"
 }
 
-# Contenu du bloc NAME (SOURCES, COMMANDS, SERVICES, EXCLUDES) trié par clé.
+# Contenu du bloc NAME (SOURCES, COMMANDS, EXCLUDES) trié par clé.
 _config_block() {
 	local name="${1}"
 	local -n arr="${name}"
@@ -618,7 +613,7 @@ _config_save() {
 		_ERR "copie impossible vers ${tmp}"
 		return 1
 	fi
-	for block in SOURCES COMMANDS SERVICES EXCLUDES; do
+	for block in SOURCES COMMANDS EXCLUDES; do
 		if ! _config_write_block "${tmp}" "${block}"; then
 			rm -f -- "${tmp}"
 			return 1
@@ -658,23 +653,8 @@ _cleanup_parts() {
 	return 0
 }
 
-_restart_services() {
-	local unit
-	((${#SERVICES_STOPPED[@]} == 0)) && return 0
-	for unit in "${SERVICES_STOPPED[@]}"; do
-		if systemctl --user start "${unit}" 2>/dev/null; then
-			_INFO "service ${unit} redémarré"
-		else
-			_WARN "échec du redémarrage de ${unit} — à relancer manuellement"
-		fi
-	done
-	SERVICES_STOPPED=()
-	return 0
-}
-
 _on_exit() {
 	_cleanup_parts
-	_restart_services
 	if [[ -n "${LOG_FILE}" ]] && [[ -s "${LOG_FILE}" ]] && ((INTERRUPTED == 0)); then
 		if ((PORCELAIN == 1)); then
 			printf '\n %bLog%b : %s\n' "${C_DIM}" "${C_RESET}" "${LOG_FILE}" >&2
@@ -700,7 +680,6 @@ _on_signal() {
 		_WARN "archive partielle supprimée : ${PART_FILE##*/}"
 	fi
 	_cleanup_parts
-	_restart_services
 	exit "${code}"
 }
 
@@ -1422,16 +1401,6 @@ _backup_one() {
 		return 3
 	fi
 
-	if [[ -n "${SERVICES[${profil}]:-}" ]]; then
-		if systemctl --user is-active --quiet "${SERVICES[${profil}]}" 2>/dev/null; then
-			if systemctl --user stop "${SERVICES[${profil}]}"; then
-				SERVICES_STOPPED+=("${SERVICES[${profil}]}")
-			else
-				_WARN "${profil} : arrêt de ${SERVICES[${profil}]} impossible"
-			fi
-		fi
-	fi
-
 	enc="$(_enc_suffix)"
 	target="${NAS_MOUNT}/${profil}_${RUN_DATE}.tar.gz${enc}"
 	part="${target}.part"
@@ -1478,7 +1447,6 @@ _backup_one() {
 		return 1
 	fi
 	PART_FILE=""
-	_restart_services
 
 	bytes="$(_file_size "${target}")"
 	size_h="$(_human_size "${bytes}")"
@@ -1564,7 +1532,6 @@ backup() {
 		esac
 	done
 
-	_restart_services
 
 	if ((DRY_RUN == 1)); then
 		printf '\n%bBilan (dry-run)%b : %d serait sauvegardé(e), %d ignoré(e), %d en échec\n' \
@@ -1809,7 +1776,6 @@ _restore_file() {
 		_ERR "${profil} : restauration en échec (les fichiers déjà extraits sont conservés)"
 		return 1
 	fi
-	_restart_services
 	return 0
 }
 
@@ -2249,7 +2215,7 @@ profile_remove() {
 		_ERR "profil inconnu : ${name}"
 		return 2
 	fi
-	unset "SOURCES[${name}]" "COMMANDS[${name}]" "SERVICES[${name}]" "EXCLUDES[${name}]"
+	unset "SOURCES[${name}]" "COMMANDS[${name}]" "EXCLUDES[${name}]"
 	if ! _config_save; then
 		_ERR "${name} : modification NON enregistrée"
 		return 1
@@ -2636,10 +2602,6 @@ main() {
 	[[ ${cmd} == "config-path" ]] && PORCELAIN=1
 
 	_need tar find sort awk stat findmnt date timeout du df pgrep readlink || return 1
-	# systemctl n'est nécessaire que si un profil déclare un service.
-	if ((${#SERVICES[@]} > 0)); then
-		_need systemctl || return 1
-	fi
 	case "${ENCRYPT}" in
 	"") ;;
 	age)

@@ -55,13 +55,6 @@ COMMANDS=(
 )
 # <<< COMMANDS
 
-# Service utilisateur arrêté pendant l'opération et redémarré dans tous les cas
-# (y compris sur erreur ou interruption).
-# >>> SERVICES
-SERVICES=(
-)
-# <<< SERVICES
-
 # Motifs exclus de l'archive, séparés par « | ». Un motif sans « / » cible un
 # nom de dossier, à n'importe quelle profondeur (ex. « target » exclut
 # Projects/rustTV/target mais pas Projects/mon-target).

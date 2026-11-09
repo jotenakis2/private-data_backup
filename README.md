@@ -77,7 +77,7 @@ Fichier bash, chargé dans cet ordre :
 4. `${XDG_CONFIG_HOME:-$HOME/.config}/private-data_backup/config`
 
 Le fichier livré (`private-data_backup.conf.example`) sert de modèle : profils
-(`SOURCES`), binaires surveillés (`COMMANDS`), services (`SERVICES`),
+(`SOURCES`), binaires surveillés (`COMMANDS`),
 exclusions (`EXCLUDES`), stockage, rétention, instantanés, journalisation,
 chiffrement. Les blocs `# >>> NOM` / `# <<< NOM` sont réécrits par
 `profile-add`/`profile-remove` et par la TUI ; les commentaires doivent rester
@@ -94,7 +94,6 @@ d'un coup (code retour 1) : `bash`, `tar`, `find`, `sort`, `awk`, `stat`,
 
 | Outil | Requis quand |
 |---|---|
-| `systemctl` | un profil déclare un service (`SERVICES`) |
 | `age` | le chiffrement est activé (`ENCRYPT=age`) |
 | `gum` | lancement de l'interface texte |
 | `awk` | interface texte (mise en forme des tailles) |

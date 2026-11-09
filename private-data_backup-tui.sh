@@ -282,10 +282,12 @@ _pick_archive() {
 
 	if ! _load_archives; then
 		gum style --border rounded --padding "0 2" --foreground 1 "${ICON_WARN}  Liste indisponible (NAS monté ?)"
+		_pause
 		return 1
 	fi
 	if ((${#A_PATH[@]} == 0)); then
 		gum style --border rounded --padding "0 2" --foreground 3 "${ICON_EMPTY}  Aucune archive."
+		_pause
 		return 1
 	fi
 	for i in "${!A_PATH[@]}"; do
@@ -319,6 +321,7 @@ _screen_backup() {
 	done
 	if ((${#labels[@]} == 0)); then
 		gum style --border rounded --padding "0 2" --foreground 3 "${ICON_EMPTY}  Aucun profil configuré."
+		_pause
 		return 0
 	fi
 
@@ -355,6 +358,7 @@ _screen_restore() {
 	if ((${#labels[@]} == 0)); then
 		gum style --border rounded --padding "0 2" --foreground 3 \
 			"${ICON_EMPTY}  Aucune archive disponible : lance d'abord une sauvegarde."
+		_pause
 		return 0
 	fi
 
@@ -447,10 +451,12 @@ _pick_archives() {
 	PICK_FILES=()
 	if ! _load_archives; then
 		gum style --border rounded --padding "0 2" --foreground 1 "${ICON_WARN}  Liste indisponible (NAS monté ?)"
+		_pause
 		return 1
 	fi
 	if ((${#A_PATH[@]} == 0)); then
 		gum style --border rounded --padding "0 2" --foreground 3 "${ICON_EMPTY}  Aucune archive."
+		_pause
 		return 1
 	fi
 	for i in "${!A_PATH[@]}"; do
@@ -504,10 +510,12 @@ _archives_encrypt() {
 	if [[ ${enc} != "age" ]]; then
 		gum style --border rounded --padding "0 2" --foreground 3 \
 			"${ICON_WARN}  Chiffrement inactif : active-le dans Configuration → Chiffrement."
+		_pause
 		return 0
 	fi
 	if ! _load_archives; then
 		gum style --border rounded --padding "0 2" --foreground 1 "${ICON_WARN}  Liste indisponible (NAS monté ?)"
+		_pause
 		return 0
 	fi
 	for i in "${!A_PATH[@]}"; do
@@ -524,6 +532,7 @@ _archives_encrypt() {
 			gum style --border rounded --padding "0 2" --foreground 2 \
 				"${ICON_CHECK}  Toutes les archives sont déjà chiffrées (${#A_PATH[@]} archive(s))."
 		fi
+		_pause
 		return 0
 	fi
 	printf '\n'
@@ -628,6 +637,7 @@ _profile_pick() {
 
 	if ((${#P_NAME[@]} == 0)); then
 		gum style --border rounded --padding "0 2" --foreground 3 "${ICON_EMPTY}  Aucun profil."
+		_pause
 		return 1
 	fi
 	for i in "${!P_NAME[@]}"; do
@@ -748,6 +758,7 @@ _screen_profiles() {
 	done
 	if ((${#labels[@]} == 0)); then
 		gum style --border rounded --padding "0 2" --foreground 3 "${ICON_EMPTY}  Aucun profil."
+		_pause
 		return 0
 	fi
 	gum style --border rounded --padding "0 2" "Profils configurés" "" "${labels[@]}"
@@ -878,6 +889,7 @@ _config_retention() {
 	keep="$(gum input --header "Archives conservées par profil" --value "${CFG_KEEP}")" || return 0
 	if [[ ! ${keep} =~ ^[0-9]+$ ]] || ((keep < 1)); then
 		gum style --border rounded --padding "0 2" --foreground 1 "Nombre invalide : ${keep}"
+		_pause
 		return 0
 	fi
 	verify="$(gum choose --header "Vérifier l'intégrité après écriture" "oui" "non")" || return 0
@@ -899,6 +911,7 @@ _config_snapshot() {
 		max="$(gum input --header "Taille max en mode auto (Mo)" --value "${CFG_SNAP_MAX}")" || return 0
 		if [[ ! ${max} =~ ^[0-9]+$ ]] || ((max < 1)); then
 			gum style --border rounded --padding "0 2" --foreground 1 "Taille invalide : ${max}"
+			_pause
 			return 0
 		fi
 	fi
@@ -942,6 +955,7 @@ _config_timeout() {
 	t="$(gum input --header "Délai des vérifications NFS (secondes)" --value "${CFG_TIMEOUT}")" || return 0
 	if [[ ! ${t} =~ ^[0-9]+$ ]] || ((t < 1)); then
 		gum style --border rounded --padding "0 2" --foreground 1 "Délai invalide : ${t}"
+		_pause
 		return 0
 	fi
 	_config_apply "NAS_TIMEOUT=${t}"
