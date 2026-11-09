@@ -35,7 +35,7 @@ PURGE           ?= 0
 
 SCRIPTS   := private-data_backup.sh private-data_backup-tui.sh
 CONF      := private-data_backup.conf.example
-MANPAGE   := private-data-backup.1
+MANPAGE   := private-data_backup.1
 CONF_DEST := $(CONFDIR)/config
 
 .PHONY: all help check install install-scripts install-config install-man reinstall uninstall

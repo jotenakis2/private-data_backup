@@ -37,7 +37,7 @@ utiliser `make reinstall` pour la remplacer explicitement.
 ## Documentation
 
 ```sh
-man private-data-backup
+man private-data_backup
 private-data_backup.sh -h
 ```
 
