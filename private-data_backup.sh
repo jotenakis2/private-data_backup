@@ -1027,31 +1027,35 @@ _group_profile() {
 # =============================================================================
 
 _usage() {
-	cat <<EOF
-${C_BOLD}${SCRIPTNAME}${C_RESET} v${VER} — sauvegarde/restauration de données privées
+	local g="${C_GREEN}" r="${C_RESET}" b="${C_BOLD}" d="${C_DIM}" c="${C_CYAN}" y="${C_YELLOW}"
 
-Usage :
-  ${C_GREEN}${0} backup${C_RESET}  [PROFIL...] [--dry-run] [--no-verify]
-  ${C_GREEN}${0} restore${C_RESET} [PROFIL]    [--yes] [--dry-run] [--snapshot|--no-snapshot]
-  ${C_GREEN}${0} rollback${C_RESET} [PROFIL]   [--yes] [--dry-run]   (instantané pré-restauration)
-  ${C_GREEN}${0} verify${C_RESET} FICHIER
-  ${C_GREEN}${0} delete-archive${C_RESET} FICHIER [--yes] [--dry-run]
-  ${C_GREEN}${0} delete_old${C_RESET} [--keep N] [--orphans|--purge-orphans] [--dry-run] [--yes]
-  ${C_GREEN}${0} show
-  ${C_GREEN}${0} list${C_RESET}    [PROFIL]
-  ${C_GREEN}${0} profile-add${C_RESET} NOM DOSSIER [BINAIRE] [EXCLUSIONS]
-  ${C_GREEN}${0} profile-remove${C_RESET} NOM
-  ${C_GREEN}${0} config-set${C_RESET} CLE=VALEUR [CLE=VALEUR...]   (NAS, rétention, chiffrement…)
-  ${C_GREEN}${0} config-path | config-check
-  ${C_GREEN}${0} --delete-logs [--dry-run] [--yes]
-  ${C_GREEN}${0} help | --version
+	printf '\n%b%s%b %bv%s%b — %s\n' \
+		"${b}" "${SCRIPTNAME}" "${r}" "${y}" "${VER}" "${r}" \
+		"sauvegarde et restauration de données privées"
 
-Options :
-EOF
+	printf '\n%bUsage%b : %s <commande> [options]\n' "${b}" "${r}" "${SCRIPTNAME}"
+
+	printf '\n%bCommandes%b\n' "${b}" "${r}"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "backup" "${r}" "${d}" "[PROFIL...]" "${r}" "sauvegarder un ou plusieurs profils"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "restore" "${r}" "${d}" "[PROFIL]" "${r}" "restaurer l'archive la plus récente"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "rollback" "${r}" "${d}" "[PROFIL]" "${r}" "revenir à l'instantané pré-restauration"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "delete_old" "${r}" "${d}" "" "${r}" "appliquer la politique de rétention"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "show" "${r}" "${d}" "" "${r}" "profils et dernière archive"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "list" "${r}" "${d}" "[PROFIL]" "${r}" "lister les archives"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "verify" "${r}" "${d}" "FICHIER" "${r}" "vérifier l'intégrité d'une archive"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "delete-archive" "${r}" "${d}" "FICHIER" "${r}" "supprimer une archive"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-add" "${r}" "${d}" "NOM DOSSIER [BINAIRE] [EXCL]" "${r}" "ajouter ou modifier un profil"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-set" "${r}" "${d}" "CLE=VALEUR..." "${r}" "modifier des paramètres"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-path" "${r}" "${d}" "" "${r}" "chemin du fichier de configuration"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "--delete-logs" "${r}" "${d}" "[--dry-run] [--yes]" "${r}" "supprimer les journaux"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "help | --version" "${r}" "${d}" "" "${r}" "cette aide, version"
+
+	printf '\n%bOptions%b\n' "${b}" "${r}"
 	local opt desc
 	while IFS='|' read -r opt desc; do
 		[[ -n ${opt} ]] || continue
-		printf '  %-16s %s\n' "${opt}" "${desc}"
+		printf '  %b%-16s%b %s\n' "${c}" "${opt}" "${r}" "${desc}"
 	done <<OPTS
 --dry-run|n'écrit et n'efface rien : affiche ce qui serait fait
 --yes, -y|ne pas demander de confirmation
@@ -1071,10 +1075,12 @@ OPTS
 	if [[ -z ${conf_affichee} ]]; then
 		conf_affichee="aucune (défaut : ${XDG_CONFIG_HOME:-${HOME}/.config}/${SCRIPTNAME}/config)"
 	fi
-	printf '\n%-13s : %s\n' "Configuration" "${conf_affichee}"
-	printf '%-13s : %s\n' "Stockage" "${NAS_MOUNT:-${NAS}/${BACKUP_SUBDIR}}"
-	printf '%-13s : %s\n' "Secrets" "archives et logs 0600, dossiers 0700 (umask 077)"
-	printf '%-13s : %s\n' "Journaux" "${HOME}/.local/share/${SCRIPTNAME}"
+	printf '\n'
+	printf '%b%-13s%b : %s\n' "${c}" "Configuration" "${r}" "${conf_affichee}"
+	printf '%b%-13s%b : %s\n' "${c}" "Stockage" "${r}" "${NAS_MOUNT:-${NAS}/${BACKUP_SUBDIR}}"
+	printf '%b%-13s%b : %s\n' "${c}" "Secrets" "${r}" "archives et journaux 0600, dossiers 0700 (umask 077)"
+	printf '%b%-13s%b : %s\n' "${c}" "Journaux" "${r}" "${HOME}/.local/share/${SCRIPTNAME}"
+	printf '\n'
 	return 0
 }
 
