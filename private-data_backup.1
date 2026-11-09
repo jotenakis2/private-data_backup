@@ -1,7 +1,7 @@
 .\" ===========================================================================
 .\" private-data_backup — page de manuel
 .\" ===========================================================================
-.TH PRIVATE-DATA_BACKUP 1 "9 novembre 2026" "private-data_backup 1.3" "Commandes utilisateur"
+.TH PRIVATE-DATA_BACKUP 1 "9 novembre 2026" "private-data_backup 1.4" "Commandes utilisateur"
 .SH NOM
 private-data_backup \- sauvegarde et restauration de données privées
 .SH SYNOPSIS
@@ -84,7 +84,7 @@ Retire un profil ; ses archives restent sur le stockage (orphelines).
 .B config-set \fICLE=VALEUR\fR...
 Modifie des paramètres du fichier de configuration : NAS, BACKUP_SUBDIR,
 KEEP_DEFAULT, VERIFY_DEFAULT, SNAPSHOT_DEFAULT, SNAPSHOT_MAX_MB,
-NAS_TIMEOUT, LOG_FILES, ENCRYPT, GPG_RECIPIENT, AGE_RECIPIENT.
+NAS_TIMEOUT, LOG_FILES, ENCRYPT, AGE_RECIPIENT, AGE_IDENTITY.
 .TP
 .B config-path
 Affiche le chemin du fichier de configuration chargé, et rien d'autre.
@@ -237,17 +237,20 @@ ainsi que le script principal dans le même dossier.
 .SH SÉCURITÉ
 Archives et journaux en 0600, dossiers en 0700
 .RB ( umask " 077)."
-Le chiffrement des archives est optionnel
-.RB ( gpg " ou " age ),
-activé par
-.B ENCRYPT
-dans la configuration. Les confirmations et le verrou ne peuvent être
+Le chiffrement des archives est optionnel et repose sur
+.BR age :
+.B ENCRYPT=age
+active le chiffrement vers
+.B AGE_RECIPIENT
+(clé age ou clé SSH publique), et
+.B AGE_IDENTITY
+désigne la clé privée utilisée pour vérifier et restaurer. Les confirmations et le verrou ne peuvent être
 contournés qu'explicitement
 .RB ( \-\-yes ).
 .SH "VOIR AUSSI"
 .BR private-data_backup-tui.sh ,
 .BR gum (1),
 .BR tar (1),
-.BR gpg (1),
+.BR age (1),
 .BR findmnt (8),
 .BR flock (1)

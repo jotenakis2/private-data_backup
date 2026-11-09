@@ -14,7 +14,7 @@
 #
 # Toute variable absente retombe sur une valeur par défaut du script.
 # Les variables PRIVATE_BACKUP_* de l'environnement ont le dernier mot
-# (NAS, SUBDIR, ENCRYPT, GPG_RECIPIENT, AGE_RECIPIENT).
+# (NAS, SUBDIR, ENCRYPT, AGE_RECIPIENT, AGE_IDENTITY).
 #
 # Les quatre blocs délimités par « # >>> NOM » et « # <<< NOM » sont réécrits
 # par `private-data_backup.sh profile-add|profile-remove` (et par la TUI) :
@@ -99,9 +99,11 @@ NAS_TIMEOUT="20"
 # Chiffrement (optionnel)
 # -----------------------------------------------------------------------------
 # ENCRYPT=""    : archives .tar.gz en clair
-# ENCRYPT="gpg" : archives .tar.gz.gpg, nécessite GPG_RECIPIENT (identifiant
-#                 ou empreinte de clé publique)
-# ENCRYPT="age" : archives .tar.gz.age, nécessite AGE_RECIPIENT (age1...)
+# ENCRYPT="age" : archives .tar.gz.age
+#   AGE_RECIPIENT : destinataire — clé age (age1...) ou clé SSH publique
+#                   (ligne « ssh-ed25519 AAAA... » de ~/.ssh/id_ed25519.pub)
+#   AGE_IDENTITY  : clé privée pour vérifier et restaurer
+#                   (.ssh/id_ed25519, keys.txt… ; vide = identité par défaut d'age)
 ENCRYPT=""
-GPG_RECIPIENT=""
 AGE_RECIPIENT=""
+AGE_IDENTITY=""

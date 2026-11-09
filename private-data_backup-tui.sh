@@ -58,7 +58,7 @@ CFG_SNAP=""
 CFG_SNAP_MAX=""
 CFG_TIMEOUT=""
 CFG_ENCRYPT=""
-CFG_GPG=""
+CFG_AGE_ID=""
 CFG_AGE=""
 CFG_LOG_FILES=""
 PF_NAME=""
@@ -722,7 +722,7 @@ Journaux      : ~/.local/share/private-data_backup/
 
 SÉCURITÉ
 --------
-Archives et journaux en 0600, dossiers en 0700, chiffrement gpg/age
+Archives et journaux en 0600, dossiers en 0700, chiffrement age (clé age ou SSH)
 optionnel (ENCRYPT dans la configuration), verrou pour empêcher deux
 exécutions simultanées.
 
@@ -744,7 +744,7 @@ _config_values_load() {
 	CFG_SNAP_MAX="$(_config_get SNAPSHOT_MAX_MB)"
 	CFG_TIMEOUT="$(_config_get NAS_TIMEOUT)"
 	CFG_ENCRYPT="$(_config_get ENCRYPT)"
-	CFG_GPG="$(_config_get GPG_RECIPIENT)"
+	CFG_AGE_ID="$(_config_get AGE_IDENTITY)"
 	CFG_AGE="$(_config_get AGE_RECIPIENT)"
 	CFG_LOG_FILES="$(_config_get LOG_FILES)"
 	return 0
@@ -805,21 +805,19 @@ _config_snapshot() {
 }
 
 _config_encrypt() {
-	local enc="" rec=""
-	enc="$(gum choose --header "Chiffrement des archives" "aucun" "gpg" "age")" || return 0
+	local enc="" rec="" id=""
+	enc="$(gum choose --header "Chiffrement des archives" "aucun" "age")" || return 0
 	case "${enc}" in
 	aucun)
-		_config_apply "ENCRYPT=" "GPG_RECIPIENT=" "AGE_RECIPIENT="
-		;;
-	gpg)
-		rec="$(gum input --header "Destinataire GPG (identifiant ou empreinte)" --value "${CFG_GPG}")" || return 0
-		[[ -n ${rec} ]] || return 0
-		_config_apply "ENCRYPT=gpg" "GPG_RECIPIENT=${rec}" "AGE_RECIPIENT="
+		_config_apply "ENCRYPT=" "AGE_RECIPIENT=" "AGE_IDENTITY="
 		;;
 	age)
-		rec="$(gum input --header "Destinataire age (age1…)" --value "${CFG_AGE}")" || return 0
+		rec="$(gum input --header "Destinataire : clé age1… ou clé SSH publique (ssh-ed25519 AAAA…)" \
+			--value "${CFG_AGE}")" || return 0
 		[[ -n ${rec} ]] || return 0
-		_config_apply "ENCRYPT=age" "AGE_RECIPIENT=${rec}" "GPG_RECIPIENT="
+		id="$(gum input --header "Clé privée pour restaurer (.ssh/id_ed25519, keys.txt…)" \
+			--value "${CFG_AGE_ID}")" || return 0
+		_config_apply "ENCRYPT=age" "AGE_RECIPIENT=${rec}" "AGE_IDENTITY=${id}"
 		;;
 	*) ;;
 	esac

@@ -9,7 +9,7 @@ disque externe), par profils déclarés dans un fichier de configuration.
   précédente si la plus récente est corrompue) ;
 - **instantané** de l'état courant avant écrasement + fichiers remplacés
   conservés en `*.pre-restore-<date>` ;
-- chiffrement optionnel (gpg / age) ;
+- chiffrement optionnel avec `age` (clé `age1…` ou clé SSH publique) ;
 - rétention configurable, purge des profils retirés de la configuration ;
 - journaux horodatés détaillés (option : liste des fichiers) ;
 - interface texte (TUI) à base de [`gum`](https://github.com/charmbracelet/gum).
@@ -94,6 +94,6 @@ d'un coup (code retour 1) : `bash`, `tar`, `find`, `sort`, `awk`, `stat`,
 | Outil | Requis quand |
 |---|---|
 | `systemctl` | un profil déclare un service (`SERVICES`) |
-| `gpg` / `age` | le chiffrement est activé (`ENCRYPT`) |
+| `age` | le chiffrement est activé (`ENCRYPT=age`) |
 | `gum` | lancement de l'interface texte |
 | `awk` | interface texte (mise en forme des tailles) |

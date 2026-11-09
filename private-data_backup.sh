@@ -40,7 +40,7 @@ export LC_COLLATE=C
 #
 # Toute variable absente du fichier retombe sur `_config_defaults`.
 
-readonly VER="1.3"
+readonly VER="1.4"
 SCRIPTNAME="${0##*/}"
 SCRIPTNAME="${SCRIPTNAME%.sh}"
 readonly SCRIPTNAME
@@ -57,8 +57,8 @@ SNAPSHOT_DEFAULT="auto"
 SNAPSHOT_MAX_MB=512
 NAS_TIMEOUT=20
 ENCRYPT=""
-GPG_RECIPIENT=""
 AGE_RECIPIENT=""
+AGE_IDENTITY=""
 
 # Tableaux remplis par le fichier de configuration. Déclarés ici (et non dans
 # le fichier) pour qu'il puisse faire de simples affectations.
@@ -414,8 +414,8 @@ _config_defaults() {
 	: "${NAS_TIMEOUT:=20}"
 	: "${LOG_FILES:=1}"
 	: "${ENCRYPT:=}"
-	: "${GPG_RECIPIENT:=}"
 	: "${AGE_RECIPIENT:=}"
+	: "${AGE_IDENTITY:=}"
 
 	# Surcharges d'environnement (tests, usage ponctuel) : elles ont le dernier
 	# mot sur le fichier de configuration.
@@ -428,11 +428,11 @@ _config_defaults() {
 	if [[ -n "${PRIVATE_BACKUP_ENCRYPT:-}" ]]; then
 		ENCRYPT="${PRIVATE_BACKUP_ENCRYPT}"
 	fi
-	if [[ -n "${PRIVATE_BACKUP_GPG_RECIPIENT:-}" ]]; then
-		GPG_RECIPIENT="${PRIVATE_BACKUP_GPG_RECIPIENT}"
-	fi
 	if [[ -n "${PRIVATE_BACKUP_AGE_RECIPIENT:-}" ]]; then
 		AGE_RECIPIENT="${PRIVATE_BACKUP_AGE_RECIPIENT}"
+	fi
+	if [[ -n "${PRIVATE_BACKUP_AGE_IDENTITY:-}" ]]; then
+		AGE_IDENTITY="${PRIVATE_BACKUP_AGE_IDENTITY}"
 	fi
 
 	VERIFY="${VERIFY_DEFAULT}"
@@ -488,9 +488,9 @@ _config_validate() {
 		;;
 	esac
 	case "${ENCRYPT}" in
-	""|gpg|age) ;;
+	""|age) ;;
 	*)
-		_ERR "ENCRYPT doit valoir \"\", gpg ou age (reçu : ${ENCRYPT})"
+		_ERR "ENCRYPT doit valoir \"\" ou age (reçu : ${ENCRYPT})"
 		errs=1
 		;;
 	esac
@@ -823,7 +823,6 @@ _free_kb() {
 
 _enc_suffix() {
 	case "${ENCRYPT}" in
-	gpg) printf '%s' ".gpg" ;;
 	age) printf '%s' ".age" ;;
 	*)   printf '%s' "" ;;
 	esac
@@ -831,14 +830,13 @@ _enc_suffix() {
 
 _archive_is_encrypted() {
 	case "${1}" in
-	*.gpg|*.gpg.part|*.age|*.age.part) return 0 ;;
+	*.age|*.age.part) return 0 ;;
 	*) return 1 ;;
 	esac
 }
 
 _encrypt() {
 	case "${ENCRYPT}" in
-	gpg) gpg --batch --yes --no-tty --trust-model always --encrypt --recipient "${GPG_RECIPIENT}" ;;
 	age) age --encrypt --recipient "${AGE_RECIPIENT}" ;;
 	*)   cat ;;
 	esac
@@ -846,8 +844,13 @@ _encrypt() {
 
 _decrypt() {
 	case "${1}" in
-	*.gpg|*.gpg.part) gpg --batch --quiet --no-tty --decrypt -- "${1}" ;;
-	*.age|*.age.part) age --decrypt -- "${1}" ;;
+	*.age|*.age.part)
+		if [[ -n ${AGE_IDENTITY} ]]; then
+			age --decrypt -i "${AGE_IDENTITY}" -- "${1}"
+		else
+			age --decrypt -- "${1}"
+		fi
+		;;
 	*) cat -- "${1}" ;;
 	esac
 }
@@ -859,12 +862,12 @@ _parse_archive() {
 	ARCH_PROFILE=""
 	ARCH_DATEKEY=""
 
-	if [[ ${base} =~ ^(.+)_([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{2})\.([0-9]{2})\.([0-9]{2})\.tar\.gz(\.gpg|\.age)?$ ]]; then
+	if [[ ${base} =~ ^(.+)_([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{2})\.([0-9]{2})\.([0-9]{2})\.tar\.gz(\.age)?$ ]]; then
 		ARCH_PROFILE="${BASH_REMATCH[1]}"
 		ARCH_DATEKEY="${BASH_REMATCH[2]}${BASH_REMATCH[3]}${BASH_REMATCH[4]}${BASH_REMATCH[5]}${BASH_REMATCH[6]}${BASH_REMATCH[7]}"
 		return 0
 	fi
-	if [[ ${base} =~ ^(.+)_([0-9]{2})_([0-9]{2})_([0-9]{4})-([0-9]{2})\.([0-9]{2})\.([0-9]{2})\.tar\.gz(\.gpg|\.age)?$ ]]; then
+	if [[ ${base} =~ ^(.+)_([0-9]{2})_([0-9]{2})_([0-9]{4})-([0-9]{2})\.([0-9]{2})\.([0-9]{2})\.tar\.gz(\.age)?$ ]]; then
 		ARCH_PROFILE="${BASH_REMATCH[1]}"
 		ARCH_DATEKEY="${BASH_REMATCH[4]}${BASH_REMATCH[3]}${BASH_REMATCH[2]}${BASH_REMATCH[5]}${BASH_REMATCH[6]}${BASH_REMATCH[7]}"
 		return 0
@@ -890,7 +893,7 @@ _collect_archives() {
 
 		files=()
 		mapfile -t files < <(find "${dir}" -maxdepth 1 -type f \
-			\( -name '*.tar.gz' -o -name '*.tar.gz.gpg' -o -name '*.tar.gz.age' \) \
+			\( -name '*.tar.gz' -o -name '*.tar.gz.age' \) \
 			-print 2>/dev/null || true)
 
 		((${#files[@]} == 0)) && continue
@@ -1352,7 +1355,7 @@ _backup_tar() {
 
 	# tar : 0 = OK, 1 = « fichier modifié pendant la lecture » (archive
 	# utilisable), >= 2 = échec réel. Avec chiffrement, pipefail renvoie le code
-	# du dernier maillon en échec : un gpg en échec (2) l'emporte donc.
+	# du dernier maillon en échec : un age en échec (2) l'emporte donc.
 	if ((rc == 1)); then
 		_log "avertissement tar : fichier(s) modifié(s) pendant la lecture (archive conservée)"
 		return 0
@@ -2059,7 +2062,7 @@ delete_archive() {
 # Clés modifiables par `config-set` (liste blanche).
 _config_key_ok() {
 	case "${1}" in
-	NAS|BACKUP_SUBDIR|KEEP_DEFAULT|VERIFY_DEFAULT|SNAPSHOT_DEFAULT|SNAPSHOT_MAX_MB|NAS_TIMEOUT|LOG_FILES|ENCRYPT|GPG_RECIPIENT|AGE_RECIPIENT) return 0 ;;
+	NAS|BACKUP_SUBDIR|KEEP_DEFAULT|VERIFY_DEFAULT|SNAPSHOT_DEFAULT|SNAPSHOT_MAX_MB|NAS_TIMEOUT|LOG_FILES|ENCRYPT|AGE_RECIPIENT|AGE_IDENTITY) return 0 ;;
 	*) return 1 ;;
 	esac
 }
@@ -2464,13 +2467,6 @@ main() {
 	fi
 	case "${ENCRYPT}" in
 	"") ;;
-	gpg)
-		_need gpg || return 1
-		if [[ -z ${GPG_RECIPIENT} ]]; then
-			_ERR "ENCRYPT=gpg mais GPG_RECIPIENT est vide"
-			return 2
-		fi
-		;;
 	age)
 		_need age || return 1
 		if [[ -z ${AGE_RECIPIENT} ]]; then
@@ -2479,7 +2475,7 @@ main() {
 		fi
 		;;
 	*)
-		_ERR "ENCRYPT doit valoir \"\", gpg ou age (reçu : ${ENCRYPT})"
+		_ERR "ENCRYPT doit valoir \"\" ou age (reçu : ${ENCRYPT})"
 		return 2
 		;;
 	esac
