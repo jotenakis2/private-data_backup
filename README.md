@@ -18,7 +18,8 @@ disque externe), par profils déclarés dans un fichier de configuration.
 
 ```sh
 make check      # syntaxe + shellcheck + validation de la configuration
-make install    # scripts dans ~/.local/bin, configuration dans ~/.config/private-data_backup/config
+make install    # scripts dans ~/.local/bin, configuration dans ~/.config/private-data_backup/config,
+                # page de manuel dans ~/.local/share/man/man1
 ```
 
 Variables utiles : `PREFIX`, `BINDIR`, `XDG_CONFIG_HOME`, `CONFDIR`,
@@ -32,6 +33,13 @@ make uninstall
 
 La configuration existante n'est **jamais** écrasée par `make install` :
 utiliser `make reinstall` pour la remplacer explicitement.
+
+## Documentation
+
+```sh
+man private-data-backup
+private-data_backup.sh -h
+```
 
 ## Utilisation
 

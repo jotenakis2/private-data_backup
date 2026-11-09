@@ -1,0 +1,227 @@
+.\" ===========================================================================
+.\" private-data-backup — page de manuel
+.\" ===========================================================================
+.TH PRIVATE-DATA-BACKUP 1 "9 novembre 2026" "private-data-backup 1.3" "Commandes utilisateur"
+.SH NOM
+private-data-backup \- sauvegarde et restauration de données privées
+.SH SYNOPSIS
+.B private-data-backup.sh
+.I commande
+.RI [ argument ...]
+.RI [ option ...]
+.br
+.B private-data-backup-tui.sh
+.SH DESCRIPTION
+.B private-data-backup
+sauvegarde des répertoires ou fichiers choisis (des
+.IR profils )
+dans des archives
+.B tar.gz
+écrites sur un stockage dédié (NAS, disque externe), et les restaure.
+Chaque profil correspond à un chemin relatif au répertoire personnel,
+déclaré dans un fichier de configuration.
+.PP
+Les archives sont écrites de façon atomique : création dans un fichier
+.B .part
+puis vérification de l'intégrité
+.RB ( tar " \-tzf)"
+et renommage final. Une archive corrompue n'est jamais promue.
+.PP
+Avant toute restauration, l'archive est vérifiée ; si la plus récente est
+corrompue, la précédente valide est utilisée. Un
+.I instantané
+de l'état courant est créé avant l'écrasement, et les fichiers remplacés
+sont conservés sur place avec le suffixe
+.BR .pre\-restore\-date .
+.PP
+Un verrou exclusif empêche deux exécutions qui écrivent de se chevaucher.
+Les opérations destructrices demandent une confirmation.
+.SH COMMANDES
+.TP
+.B backup \fR[\fIPROFIL\fR...]
+Sauvegarde un ou plusieurs profils (tous si aucun n'est donné). Un profil
+dont l'application surveillée tourne, ou dont la source est absente, est
+ignoré ; les autres continuent et un bilan est affiché.
+.TP
+.B restore \fR[\fIPROFIL\fR]
+Restaure l'archive la plus récente d'un profil (menu si aucun n'est donné
+et si l'entrée est un terminal).
+.TP
+.B rollback \fR[\fIPROFIL\fR]
+Restaure le dernier instantané
+.B pre\-restore
+d'un profil, c'est\-à\-dire l'état d'avant une restauration précédente.
+.TP
+.B delete_old
+Applique la politique de rétention : conserve
+.B KEEP
+archives par profil et supprime les autres après confirmation.
+.TP
+.B show
+Affiche les profils, la dernière archive de chacun, les totaux et les
+profils hors configuration (orphelins).
+.TP
+.B list \fR[\fIPROFIL\fR]
+Liste toutes les archives, orphelins marqués d'une astérisque.
+.TP
+.B verify \fIFichier\fR
+Vérifie l'intégrité d'une archive.
+.TP
+.B delete-archive \fIFichier\fR
+Supprime une archive précise du stockage (chemin contraint au stockage).
+.TP
+.B profile-add \fINOM DOSSIER \fR[\fIBINAIRE\fR] [\fIEXCLUSIONS\fR]
+Ajoute ou modifie un profil dans le fichier de configuration.
+.TP
+.B profile-remove \fINOM\fR
+Retire un profil ; ses archives restent sur le stockage (orphelines).
+.TP
+.B config-set \fICLE=VALEUR\fR...
+Modifie des paramètres du fichier de configuration : NAS, BACKUP_SUBDIR,
+KEEP_DEFAULT, VERIFY_DEFAULT, SNAPSHOT_DEFAULT, SNAPSHOT_MAX_MB,
+NAS_TIMEOUT, LOG_FILES, ENCRYPT, GPG_RECIPIENT, AGE_RECIPIENT.
+.TP
+.B config-path
+Affiche le chemin du fichier de configuration chargé, et rien d'autre.
+.TP
+.B config-check
+Valide la configuration et quitte (code 0 si elle est valide).
+.TP
+.B \-\-delete\-logs
+Supprime les journaux du répertoire de journaux. Action autonome, utilisable
+avec
+.B \-\-dry\-run
+et
+.BR \-\-yes .
+.TP
+.B help, \-\-version
+Aide ou version.
+.SH OPTIONS
+.TP
+.B \-\-dry\-run
+N'écrit et n'efface rien : affiche ce qui serait fait.
+.TP
+.BR \-\-yes ", " \-y
+Ne pas demander de confirmation.
+.TP
+.B \-\-no\-verify
+Ne pas vérifier l'intégrité (sauvegarde et rétention).
+.TP
+.BI \-\-keep " N"
+Nombre d'archives conservées par profil (rétention).
+.TP
+.B \-\-orphans
+Inclure les profils hors configuration dans la rétention.
+.TP
+.B \-\-purge\-orphans
+Supprimer toutes les archives des profils hors configuration.
+.TP
+.B \-\-snapshot
+Forcer l'instantané avant restauration.
+.TP
+.B \-\-no\-snapshot
+Interdire l'instantané avant restauration.
+.TP
+.B \-\-porcelain
+Sortie tabulée stable, destinée aux interfaces
+.RB ( show " et " list ).
+.TP
+.BI \-\-archive " FICHIER"
+Restaurer cette archive précise (avec
+.BR restore ).
+.TP
+.BI \-\-config " FICHIER"
+Utiliser ce fichier de configuration.
+.SH CONFIGURATION
+Fichier bash chargé dans cet ordre :
+.IP "1." 4
+.BI \-\-config " FICHIER"
+.IP "2." 4
+la variable d'environnement
+.B PRIVATE_BACKUP_CONFIG
+.IP "3." 4
+.B private\-data\-backup.conf
+à côté du script (liens symboliques résolus)
+.IP "4." 4
+.BR "$XDG_CONFIG_HOME/private\-data\-backup/config" ,
+par défaut
+.BR ~/.config/private\-data\-backup/config .
+.PP
+Le fichier livré,
+.BR private\-data\-backup.conf.example ,
+sert de modèle. Les blocs délimités par
+.B # >>> NOM
+et
+.B # <<< NOM
+sont réécrits par
+.B profile\-add
+et
+.BR profile\-remove .
+Toute valeur absente retombe sur un défaut du script.
+.SH FICHIERS
+.TP
+.B ~/.config/private\-data\-backup/config
+Configuration par défaut.
+.TP
+.B /media/NAS/backup/data2restore
+Stockage par défaut des archives (défini par
+.B NAS
+et
+.BR BACKUP_SUBDIR ).
+.TP
+.B ~/.local/share/private\-data\-backup/*.log
+Journaux horodatés.
+.TP
+.BR "$XDG_RUNTIME_DIR/private\-data\-backup.\fIUID\fR.lock"
+Verrou d'exclusion mutuelle.
+.SH "CODES DE RETOUR"
+.TP
+.B 0
+Succès.
+.TP
+.B 1
+Échec (au moins une opération).
+.TP
+.B 2
+Erreur d'usage ou configuration invalide.
+.TP
+.B 3
+Opération annulée par l'utilisateur.
+.SH EXEMPLES
+.TP
+.B private\-data\-backup.sh backup
+Sauvegarde tous les profils.
+.TP
+.B private\-data\-backup.sh backup SSH DOCUMENTS \-\-no\-verify
+Sauvegarde deux profils sans relire les archives.
+.TP
+.B private\-data\-backup.sh restore SSH
+Restaure SSH après vérification et confirmation.
+.TP
+.B private\-data\-backup.sh delete_old \-\-dry\-run
+Aperçu de la rétention, sans rien supprimer.
+.TP
+.B private\-data\-backup.sh delete_old \-\-purge\-orphans
+Supprime les archives des profils retirés de la configuration.
+.TP
+.B private\-data\-backup.sh \-\-delete\-logs \-\-dry\-run
+Liste les journaux qui seraient supprimés.
+.TP
+.B private\-data\-backup\-tui.sh
+Interface texte : sauvegarder, restaurer, agir sur les archives, gérer les
+profils et la configuration.
+.SH SÉCURITÉ
+Archives et journaux en 0600, dossiers en 0700
+.RB ( umask " 077)."
+Le chiffrement des archives est optionnel
+.RB ( gpg " ou " age ),
+activé par
+.B ENCRYPT
+dans la configuration. Les confirmations et le verrou ne peuvent être
+contournés qu'explicitement
+.RB ( \-\-yes ).
+.SH "VOIR AUSSI"
+.BR tar (1),
+.BR gpg (1),
+.BR findmnt (8),
+.BR flock (1)

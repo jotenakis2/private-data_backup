@@ -1,7 +1,7 @@
 # =============================================================================
 # private-data-backup — installation
 #
-#   make check        vérifie la syntaxe, shellcheck et la configuration
+#   make check        vérifie la syntaxe, shellcheck, la configuration et le manuel
 #   make install      installe les scripts et la configuration
 #   make reinstall    idem mais remplace la configuration existante
 #   make uninstall    retire les scripts (PURGE=1 pour aussi la configuration)
@@ -27,6 +27,7 @@ PREFIX          ?= $(HOME)/.local
 BINDIR          ?= $(PREFIX)/bin
 XDG_CONFIG_HOME ?= $(HOME)/.config
 CONFDIR         ?= $(XDG_CONFIG_HOME)/private-data_backup
+MANDIR          ?= $(PREFIX)/share/man
 DESTDIR         ?=
 INSTALL         ?= install
 FORCE           ?= 0
@@ -34,9 +35,10 @@ PURGE           ?= 0
 
 SCRIPTS   := private-data_backup.sh private-data_backup-tui.sh
 CONF      := private-data_backup.conf.example
+MANPAGE   := private-data-backup.1
 CONF_DEST := $(CONFDIR)/config
 
-.PHONY: all help check install install-scripts install-config reinstall uninstall
+.PHONY: all help check install install-scripts install-config install-man reinstall uninstall
 
 all: check
 
@@ -44,7 +46,8 @@ help:
 	@printf '\n'
 	@printf 'private-data-backup — cibles disponibles\n\n'
 	@printf '  make check       syntaxe + shellcheck + validation de la configuration\n'
-	@printf '  make install     scripts dans %s, configuration dans %s\n' '$(DESTDIR)$(BINDIR)' '$(DESTDIR)$(CONFDIR)'
+	@printf '  make install     scripts dans %s, configuration dans %s, manuel dans %s\n' \
+		'$(DESTDIR)$(BINDIR)' '$(DESTDIR)$(CONFDIR)' '$(DESTDIR)$(MANDIR)/man1'
 	@printf '  make reinstall   comme install, en remplaçant la configuration\n'
 	@printf '  make uninstall   retire les scripts (PURGE=1 : aussi la configuration)\n'
 	@printf '\n'
@@ -60,9 +63,12 @@ check:
 	done
 	@printf '  config      %s\n' "$(CONF)"
 	@./private-data_backup.sh --config "$(CONF)" config-check >/dev/null
+	@printf '  manuel      %s\n' "$(MANPAGE)"
+	@out="$$(groff -Kutf8 -man -z -ww "$(MANPAGE)" 2>&1)" || exit 1; \
+	 if [ -n "$$out" ]; then printf '%s\n' "$$out"; exit 1; fi
 	@printf '  OK\n'
 
-install: install-scripts install-config
+install: install-scripts install-config install-man
 
 install-scripts:
 	@$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
@@ -78,12 +84,18 @@ install-config:
 		printf '  config    -> %s\n' "$(DESTDIR)$(CONF_DEST)"; \
 	fi
 
+install-man:
+	@$(INSTALL) -d "$(DESTDIR)$(MANDIR)/man1"
+	@$(INSTALL) -m 644 $(MANPAGE) "$(DESTDIR)$(MANDIR)/man1/"
+	@printf '  manuel    -> %s\n' "$(DESTDIR)$(MANDIR)/man1/$(MANPAGE)"
+
 reinstall: FORCE := 1
 reinstall: install
 
 uninstall:
 	@rm -f "$(DESTDIR)$(BINDIR)/private-data_backup.sh" \
-	       "$(DESTDIR)$(BINDIR)/private-data_backup-tui.sh"
+	       "$(DESTDIR)$(BINDIR)/private-data_backup-tui.sh" \
+	       "$(DESTDIR)$(MANDIR)/man1/$(MANPAGE)"
 	@printf '  scripts   retirés de %s\n' "$(DESTDIR)$(BINDIR)"
 	@if [ "$(PURGE)" = "1" ]; then \
 		rm -f "$(DESTDIR)$(CONF_DEST)"; \
