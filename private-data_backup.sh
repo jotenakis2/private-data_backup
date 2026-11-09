@@ -185,7 +185,9 @@ delete_logs() {
 	if ((${#files[@]} == 0)); then
 		_INFO "aucun journal à supprimer dans ${dir}"
 		if ((${#others[@]} > 0)); then
-			_INFO "${#others[@]} autre(s) fichier(s) conservé(s)"
+			local no=${#others[@]} c=""
+			c="$(_count "${no}" "autre fichier conservé" "autres fichiers conservés")"
+			_INFO "${c}"
 		fi
 		return 0
 	fi
@@ -200,14 +202,20 @@ delete_logs() {
 		for f in "${files[@]}"; do
 			_INFO "serait supprimé : ${f##*/}"
 		done
-		_INFO "${#files[@]} journal(aux), ${human} — --dry-run, rien n'a été supprimé"
+		local nf=${#files[@]} c=""
+		c="$(_count "${nf}" journal journaux)"
+		_INFO "${c}, ${human} — --dry-run, rien n'a été supprimé"
 		if ((${#others[@]} > 0)); then
-			_INFO "${#others[@]} autre(s) fichier(s) conservé(s)"
+			local no=${#others[@]} c=""
+			c="$(_count "${no}" "autre fichier conservé" "autres fichiers conservés")"
+			_INFO "${c}"
 		fi
 		return 0
 	fi
 
-	if ! _confirm "Supprimer ${#files[@]} journal(aux) de ${dir} (${human}) ?"; then
+	local nf=${#files[@]} c=""
+	c="$(_count "${nf}" journal journaux)"
+	if ! _confirm "Supprimer ${c} de ${dir} (${human}) ?"; then
 		_INFO "annulé — rien n'a été supprimé"
 		return 0
 	fi
@@ -218,7 +226,9 @@ delete_logs() {
 		fi
 	done
 	if ((${#others[@]} > 0)); then
-		_INFO "${#others[@]} autre(s) fichier(s) conservé(s) dans ${dir}"
+		local no=${#others[@]} c=""
+		c="$(_count "${no}" "autre fichier conservé" "autres fichiers conservés")"
+		_INFO "${c} dans ${dir}"
 	fi
 	printf '\n'
 	return "${rc}"
@@ -277,6 +287,14 @@ _human_size() {
 		if (i == 1) printf "%d %s", s, u[i]
 		else printf "%.1f %s", s, u[i]
 	}'
+	return 0
+}
+
+# _count N singulier pluriel -> « 3 archives », « 1 archive » (0 = pluriel)
+_count() {
+	local n="${1}" w=""
+	if [[ ${n} == "1" ]]; then w="${2}"; else w="${3}"; fi
+	printf '%s %s' "${n}" "${w}"
 	return 0
 }
 
@@ -1234,8 +1252,10 @@ show() {
 
 	local total_h orphan_h
 	total_h="$(_human_size "${total}")"
-	printf '\n%bContenu de %s%b : %d archive(s), %s' \
-		"${C_BOLD}" "${NAS_MOUNT}" "${C_RESET}" "${#ARCH_PATH[@]}" "${total_h}"
+	local na=${#ARCH_PATH[@]} ca=""
+	ca="$(_count "${na}" archive archives)"
+	printf '\n%bContenu de %s%b : %s, %s' \
+		"${C_BOLD}" "${NAS_MOUNT}" "${C_RESET}" "${ca}" "${total_h}"
 	if ((${#orphelins[@]} > 0)); then
 		orphan_h="$(_human_size "${orphan_total}")"
 		printf ' dont %s de profils hors configuration' "${orphan_h}"
@@ -1251,7 +1271,9 @@ show() {
 
 	local snap_h
 	snap_h="$(_human_size "${snap_total}")"
-	printf ' Instantanés avant restauration : %d fichier(s), %s\n\n' "${snap_count}" "${snap_h}"
+	local cs=""
+	cs="$(_count "${snap_count}" fichier fichiers)"
+	printf ' Instantanés avant restauration : %s, %s\n\n' "${cs}" "${snap_h}"
 	return 0
 }
 
@@ -1323,7 +1345,9 @@ list() {
 			"${C_DIM}" "${C_RESET}"
 	fi
 	if ((skipped > 0)); then
-		_INFO "${skipped} archive(s) masquée(s) par le filtre"
+		local cs=""
+		cs="$(_count "${skipped}" "archive masquée" "archives masquées")"
+		_INFO "${cs} par le filtre"
 	fi
 	return 0
 }
@@ -1373,7 +1397,7 @@ _backup_tar() {
 	# utilisable), >= 2 = échec réel. Avec chiffrement, pipefail renvoie le code
 	# du dernier maillon en échec : un age en échec (2) l'emporte donc.
 	if ((rc == 1)); then
-		_log "avertissement tar : fichier(s) modifié(s) pendant la lecture (archive conservée)"
+		_log "avertissement tar : des fichiers ont été modifiés pendant la lecture (archive conservée)"
 		return 0
 	fi
 	((rc == 0)) && return 0
@@ -1533,14 +1557,19 @@ backup() {
 	done
 
 
+	local c_done="" c_skip=""
 	if ((DRY_RUN == 1)); then
-		printf '\n%bBilan (dry-run)%b : %d serait sauvegardé(e), %d ignoré(e), %d en échec\n' \
-			"${C_BOLD}" "${C_RESET}" "${done_count}" "${skipped}" "${FAILURES}"
+		c_done="$(_count "${done_count}" "sauvegarde prévue" "sauvegardes prévues")"
+		c_skip="$(_count "${skipped}" ignoré ignorés)"
+		printf '\n%bBilan (dry-run)%b : %s, %s, %d en échec\n' \
+			"${C_BOLD}" "${C_RESET}" "${c_done}" "${c_skip}" "${FAILURES}"
 		return "${rc}"
 	fi
 
-	printf '\n%bBilan%b : %d sauvegardée(s), %d ignorée(s), %d en échec\n' \
-		"${C_BOLD}" "${C_RESET}" "${done_count}" "${skipped}" "${FAILURES}"
+	c_done="$(_count "${done_count}" sauvegardée sauvegardées)"
+	c_skip="$(_count "${skipped}" ignorée ignorées)"
+	printf '\n%bBilan%b : %s, %s, %d en échec\n' \
+		"${C_BOLD}" "${C_RESET}" "${c_done}" "${c_skip}" "${FAILURES}"
 	if ((FAILURES > 0)); then
 		_show_log_tail
 		return 1
@@ -1685,7 +1714,7 @@ _restore_extract() {
 		_log "--- fin de la liste des fichiers extraits ---"
 	fi
 	if ((rc == 1)); then
-		_log "avertissement tar : fichier(s) modifié(s) pendant l'extraction"
+		_log "avertissement tar : des fichiers ont été modifiés pendant l'extraction"
 		return 0
 	fi
 	return "${rc}"
@@ -2059,7 +2088,9 @@ delete_archive() {
 			_INFO "à supprimer : ${f##*/}"
 		done
 	fi
-	if ! _confirm "Supprimer définitivement ${#files[@]} fichier(s) ?"; then
+	local nf=${#files[@]} c=""
+	c="$(_count "${nf}" fichier fichiers)"
+	if ! _confirm "Supprimer définitivement ${c} ?"; then
 		_INFO "annulé — rien n'a été supprimé"
 		return 0
 	fi
@@ -2277,7 +2308,9 @@ encrypt_archives() {
 		elif ((${#ARCH_PATH[@]} == 0)); then
 			_INFO "aucune archive sur le stockage"
 		else
-			_INFO "toutes les archives sont déjà chiffrées (${#ARCH_PATH[@]} archive(s))"
+			local na=${#ARCH_PATH[@]} ca=""
+			ca="$(_count "${na}" archive archives)"
+			_INFO "toutes les archives sont déjà chiffrées (${ca})"
 		fi
 		return 0
 	fi
@@ -2297,13 +2330,17 @@ encrypt_archives() {
 	for f in "${cibles[@]}"; do
 		_INFO "à chiffrer : ${f##*/}"
 	done
-	printf ' %b·%b %d archive(s), %s\n' "${C_CYAN}" "${C_RESET}" "${#cibles[@]}" "${total_h}"
+	local nc=${#cibles[@]} cc=""
+	cc="$(_count "${nc}" archive archives)"
+	printf ' %b·%b %s, %s\n' "${C_CYAN}" "${C_RESET}" "${cc}" "${total_h}"
 
 	if ((DRY_RUN == 1)); then
 		_INFO "--dry-run : rien n'a été chiffré"
 		return 0
 	fi
-	if ! _confirm "Chiffrer ${#cibles[@]} archive(s) et supprimer les originaux en clair ?"; then
+	local nc=${#cibles[@]} cc=""
+	cc="$(_count "${nc}" archive archives)"
+	if ! _confirm "Chiffrer ${cc} et supprimer les originaux en clair ?"; then
 		_INFO "annulé — rien n'a été modifié"
 		return 0
 	fi
@@ -2461,7 +2498,9 @@ delete_old() {
 	done
 
 	if ((${#del_paths[@]} == 0)); then
-		_INFO "rien à supprimer (rétention : ${KEEP} par groupe, ${kept_total} conservée(s))"
+		local ck=""
+		ck="$(_count "${kept_total}" conservée conservées)"
+		_INFO "rien à supprimer (rétention : ${KEEP} par groupe, ${ck})"
 		return "${rc}"
 	fi
 
@@ -2476,15 +2515,18 @@ delete_old() {
 			"${C_RED}" "${C_RESET}" "${name}" "(${del_reasons[${i}]})" "${size_h}"
 	done
 	size_h="$(_human_size "${total_bytes}")"
-	printf '  %b→ %s libérables, %d conservée(s)%b\n' \
-		"${C_DIM}" "${size_h}" "${kept_total}" "${C_RESET}"
+	local ck=""
+	ck="$(_count "${kept_total}" conservée conservées)"
+	printf '  %b→ %s libérables, %s%b\n' "${C_DIM}" "${size_h}" "${ck}" "${C_RESET}"
 
 	if ((DRY_RUN == 1)); then
 		_INFO "--dry-run : rien n'a été supprimé"
 		return "${rc}"
 	fi
 
-	if ! _confirm "Supprimer définitivement ces ${#del_paths[@]} fichier(s) ?"; then
+	local nd=${#del_paths[@]} cd=""
+	cd="$(_count "${nd}" fichier fichiers)"
+	if ! _confirm "Supprimer définitivement ${cd} ?"; then
 		_INFO "annulé — rien n'a été supprimé"
 		return 0
 	fi
@@ -2499,7 +2541,9 @@ delete_old() {
 		fi
 	done
 
-	printf '\n%b%d archive(s) supprimée(s)%b\n' "${C_GREEN}" "${deleted}" "${C_RESET}"
+	local cd=""
+	cd="$(_count "${deleted}" "archive supprimée" "archives supprimées")"
+	printf '\n%b%s%b\n' "${C_GREEN}" "${cd}" "${C_RESET}"
 	if ((deleted != ${#del_paths[@]})); then
 		rc=1
 	fi

@@ -131,7 +131,16 @@ _human() {
 	return 0
 }
 
+# _count N singulier pluriel -> « 3 archives », « 1 archive » (0 = pluriel)
+_count() {
+	local n="${1}" w=""
+	if [[ ${n} == "1" ]]; then w="${2}"; else w="${3}"; fi
+	printf '%s %s' "${n}" "${w}"
+	return 0
+}
+
 _fmt_dt() {
+
 	local d="${1:-}"
 	if [[ ${#d} -ne 14 ]]; then
 		printf '%s' "—"
@@ -494,8 +503,10 @@ _archives_delete() {
 	done
 	total_h="$(_human "${total}")"
 	gum style --border rounded --padding "0 2" "Suppression" "" "${disps[@]}" "" "total : ${total_h}"
+	local np=${#PICK_FILES[@]} cp=""
+	cp="$(_count "${np}" archive archives)"
 	if ! gum confirm --default=false --affirmative "Supprimer" --negative "Annuler" \
-		"Supprimer définitivement ${#PICK_FILES[@]} archive(s) ?"; then
+		"Supprimer définitivement ${cp} ?"; then
 		return 0
 	fi
 	printf '\n'
@@ -529,8 +540,14 @@ _archives_encrypt() {
 			gum style --border rounded --padding "0 2" --foreground 3 \
 				"${ICON_EMPTY}  Aucune archive sur le stockage."
 		else
-			gum style --border rounded --padding "0 2" --foreground 2 \
-				"${ICON_CHECK}  Toutes les archives sont déjà chiffrées (${#A_PATH[@]} archive(s))."
+			local na=${#A_PATH[@]}
+			if ((na == 1)); then
+				gum style --border rounded --padding "0 2" --foreground 2 \
+					"${ICON_CHECK}  L'archive est déjà chiffrée (1 archive)."
+			else
+				gum style --border rounded --padding "0 2" --foreground 2 \
+					"${ICON_CHECK}  Toutes les archives sont déjà chiffrées (${na} archives)."
+			fi
 		fi
 		_pause
 		return 0
@@ -598,7 +615,9 @@ _screen_archives() {
 				total=$((total + A_SIZE[i]))
 			done
 		fi
-		header="${ICON_ARCHIVE}  Archives — ${count} fichier(s), $(_human "${total}") — que faire ?"
+		local cc=""
+		cc="$(_count "${count}" fichier fichiers)"
+		header="${ICON_ARCHIVE}  Archives — ${cc}, $(_human "${total}") — que faire ?"
 
 		action="$(gum choose --header "${header}" --cursor "❯ " \
 			"${ICON_EYE}  Voir les archives" \
@@ -972,6 +991,8 @@ _screen_config() {
 		*) snap="oui" ;;
 		esac
 		local snap_line="instantané   : ${CFG_SNAP}"
+		local keep_line=""
+		keep_line="$(_count "${CFG_KEEP}" archive archives)"
 		local CFG_LISTE="non"
 		[[ ${CFG_LOG_FILES} == "1" ]] && CFG_LISTE="oui"
 		if [[ ${CFG_SNAP} == "auto" ]]; then
@@ -981,7 +1002,7 @@ _screen_config() {
 			"Configuration" \
 			"" \
 			"destination  : ${CFG_NAS}/${CFG_SUB}" \
-			"rétention    : ${CFG_KEEP} archive(s) par profil" \
+			"rétention    : ${keep_line} par profil" \
 			"vérification : ${snap} après écriture" \
 			"${snap_line}" \
 			"chiffrement  : ${CFG_ENCRYPT:-aucun}" \
