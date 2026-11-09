@@ -497,6 +497,19 @@ _archives_delete() {
 	return 0
 }
 
+_archives_encrypt() {
+	printf '\n'
+	"${CLI}" encrypt-archives --dry-run
+	if ! gum confirm --default=false --affirmative "Chiffrer" --negative "Annuler" \
+		"Chiffrer ces archives et supprimer les originaux en clair ?"; then
+		return 0
+	fi
+	printf '\n'
+	"${CLI}" encrypt-archives --yes
+	_pause
+	return 0
+}
+
 _archives_retention() {
 	printf '\n'
 	"${CLI}" delete_old --dry-run
@@ -543,6 +556,7 @@ _screen_archives() {
 			"Restaurer une version" \
 			"Vérifier une archive" \
 			"Supprimer des archives" \
+			"Chiffrer les archives en clair" \
 			"Appliquer la politique de rétention" \
 			"Purger les profils orphelins" \
 			"Retour")" || return 0
@@ -556,6 +570,7 @@ _screen_archives() {
 		Restaurer*) _archives_restore ;;
 		Vérifier*) _archives_verify ;;
 		Supprimer*) _archives_delete ;;
+		Chiffrer*) _archives_encrypt ;;
 		Appliquer*) _archives_retention ;;
 		Purger*) _archives_purge ;;
 		*) return 0 ;;
@@ -985,7 +1000,8 @@ main() {
 		printf '  %-16s %s\n' "Sauvegarder"   "choisir des profils et lancer une sauvegarde"
 		printf '  %-16s %s\n' "Restaurer"     "restaurer la dernière archive, avec ou sans instantané"
 		printf '  %-16s %s\n' "Archives"      "voir, restaurer une version, vérifier, supprimer (x pour"
-		printf '  %-16s %s\n' ""              "cocher plusieurs archives), rétention, purge des orphelins"
+		printf '  %-16s %s\n' ""              "cocher plusieurs archives), chiffrer les archives en clair,"
+		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
 		printf '  %-16s %s\n' "Profils"       "ajouter, modifier ou retirer un profil"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
 		printf '  %-16s %s\n' "Description"   "présentation de l'outil"

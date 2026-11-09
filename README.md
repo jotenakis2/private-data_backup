@@ -50,7 +50,8 @@ private-data_backup.sh rollback [PROFIL]   [--yes] [--dry-run]
 private-data_backup.sh delete_old [--keep N] [--orphans|--purge-orphans] [--dry-run] [--yes]
 private-data_backup.sh show | list [PROFIL]
 private-data_backup.sh verify FICHIER
-private-data_backup.sh delete-archive FICHIER [--yes] [--dry-run]
+private-data_backup.sh delete-archive FICHIER... [--yes] [--dry-run]
+private-data_backup.sh encrypt-archives [PROFIL...] [--dry-run] [--yes]
 private-data_backup.sh profile-add NOM DOSSIER [BINAIRE] [EXCLUSIONS]
 private-data_backup.sh profile-remove NOM
 private-data_backup.sh config-set CLE=VALEUR...

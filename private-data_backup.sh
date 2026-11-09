@@ -1078,6 +1078,7 @@ _usage() {
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "list" "${r}" "${d}" "[PROFIL]" "${r}" "lister les archives"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "verify" "${r}" "${d}" "FICHIER" "${r}" "vérifier l'intégrité d'une archive"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "delete-archive" "${r}" "${d}" "FICHIER..." "${r}" "supprimer des archives"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "encrypt-archives" "${r}" "${d}" "[PROFIL...]" "${r}" "chiffrer les archives en clair (age)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-add" "${r}" "${d}" "NOM DOSSIER [BINAIRE] [EXCL]" "${r}" "ajouter ou modifier un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-set" "${r}" "${d}" "CLE=VALEUR..." "${r}" "modifier des paramètres"
@@ -2258,6 +2259,123 @@ profile_remove() {
 }
 
 # =============================================================================
+# CHIFFREMENT DES ARCHIVES EN CLAIR
+# =============================================================================
+
+# Chiffre un fichier vers un autre (pipeline executé dans _RUN).
+_encrypt_file() {
+	age --encrypt --recipient "${AGE_RECIPIENT}" < "${1}" > "${2}"
+}
+
+encrypt_archives() {
+	local -a filtres=("${@}") cibles=()
+	local -A filtre=()
+	local f i group profile total=0 total_h="" free_kb="" need_kb="" cible="" part="" rc=0
+
+	if [[ ${ENCRYPT} != "age" ]]; then
+		_ERR "chiffrement inactif : configure ENCRYPT=age et AGE_IDENTITY"
+		return 2
+	fi
+	_check_nas_rw || return 1
+	_check_nas_perms
+	_collect_archives
+
+	for f in "${filtres[@]}"; do
+		f="${f^^}"
+		if ! _known_profile "${f}"; then
+			_ERR "profil inconnu : ${f} (voir « show »)"
+			return 2
+		fi
+		filtre[${f}]=1
+	done
+
+	for i in "${!ARCH_PATH[@]}"; do
+		f="${ARCH_PATH[${i}]}"
+		case "${f}" in
+		*.age) continue ;;
+		*.tar.gz) ;;
+		*) continue ;;
+		esac
+		group="${ARCH_GROUP[${i}]}"
+		profile="$(_group_profile "${group}")"
+		if ((${#filtres[@]} > 0)) && [[ -z "${filtre[${profile}]:-}" ]]; then
+			continue
+		fi
+		cibles+=("${f}")
+		total=$((total + ARCH_SIZE[i]))
+	done
+
+	if ((${#cibles[@]} == 0)); then
+		_INFO "aucune archive en clair à chiffrer"
+		return 0
+	fi
+	total_h="$(_human_size "${total}")"
+
+	# De la place pour la copie chiffrée avant de retirer l'original.
+	need_kb=$((total / 1024 + 262144))
+	free_kb="$(_free_kb)"
+	if ((free_kb > 0)) && ((free_kb < need_kb)); then
+		local free_h="" need_h=""
+		free_h="$(_human_size $((free_kb * 1024)))"
+		need_h="$(_human_size $((need_kb * 1024)))"
+		_ERR "espace insuffisant : ${free_h} libres, ~${need_h} nécessaires"
+		return 1
+	fi
+
+	for f in "${cibles[@]}"; do
+		_INFO "à chiffrer : ${f##*/}"
+	done
+	printf ' %b·%b %d archive(s), %s\n' "${C_CYAN}" "${C_RESET}" "${#cibles[@]}" "${total_h}"
+
+	if ((DRY_RUN == 1)); then
+		_INFO "--dry-run : rien n'a été chiffré"
+		return 0
+	fi
+	if ! _confirm "Chiffrer ${#cibles[@]} archive(s) et supprimer les originaux en clair ?"; then
+		_INFO "annulé — rien n'a été modifié"
+		return 0
+	fi
+
+	for f in "${cibles[@]}"; do
+		cible="${f}.age"
+		if [[ -e ${cible} ]]; then
+			_WARN "${cible##*/} existe déjà — ignorée"
+			continue
+		fi
+		part="${cible}.part"
+		PART_FILE="${part}"
+		if ! _RUN "Chiffrement de ${f##*/}" _encrypt_file "${f}" "${part}"; then
+			_show_log_tail
+			_cleanup_parts
+			rc=1
+			continue
+		fi
+		if ! _verify_archive "${part}"; then
+			_cleanup_parts
+			_ERR "${f##*/} : archive chiffrée invalide — original conservé"
+			rc=1
+			continue
+		fi
+		chmod 600 -- "${part}" 2>/dev/null
+		PART_FILE=""
+		if ! mv -f -- "${part}" "${cible}"; then
+			_cleanup_parts
+			_ERR "${cible##*/} : renommage impossible — original conservé"
+			rc=1
+			continue
+		fi
+		if ! rm -f -- "${f}"; then
+			_ERR "${f##*/} : original non supprimé (les deux versions coexistent)"
+			rc=1
+			continue
+		fi
+		_log "chiffré : ${cible} ; original supprimé : ${f}"
+		_INFO "${cible##*/} chiffrée, original supprimé"
+	done
+	return "${rc}"
+}
+
+# =============================================================================
 # DELETE_OLD
 # =============================================================================
 
@@ -2476,7 +2594,7 @@ main() {
 	fi
 
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|show|list|verify|delete-archive|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
+	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
 	*)
 		_ERR "commande inconnue : ${cmd}"
 		printf '\n' >&2
@@ -2546,7 +2664,7 @@ main() {
 	# Les commandes de consultation (`show`, `list`, `config-path`…) sont
 	# appelées en boucle par la TUI : elles ne créent pas de journal.
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
+	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
 	*) LOG_RUN=0 ;;
 	esac
 	if ((LOG_RUN == 1)); then
@@ -2566,7 +2684,7 @@ main() {
 	# pourraient produire deux archives concurrentes, et delete_old pourrait
 	# supprimer une archive en cours d'écriture).
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|profile-add|profile-remove|config-set)
+	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|profile-add|profile-remove|config-set)
 		needs_lock=1
 		;;
 	*) needs_lock=0 ;;
@@ -2611,6 +2729,10 @@ main() {
 		;;
 	delete-archive)
 		delete_archive "${positional[@]}"
+		rc=$?
+		;;
+	encrypt-archives)
+		encrypt_archives "${positional[@]}"
 		rc=$?
 		;;
 	profile-add)
