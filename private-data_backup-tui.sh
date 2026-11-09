@@ -197,6 +197,9 @@ _load() {
 		return 1
 	fi
 
+	# Tri par taille de la dernière archive (décroissant), puis par nom.
+	out="$(printf '%s\n' "${out}" | sort -t$'\t' -k6,6nr -k1,1 || true)"
+
 	P_NAME=(); P_SRC=(); P_CMD=(); P_ARCH=(); P_DATE=(); P_SIZE=(); P_EXCL=()
 	mapfile -t lines <<<"${out}"
 	for line in "${lines[@]}"; do
