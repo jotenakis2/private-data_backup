@@ -4,8 +4,9 @@
 # private-data_backup-tui.sh — interface texte (gum) pour private-data_backup.sh
 #
 # Périmètre : sauvegarder, restaurer (archive ou instantané), agir sur les
-# archives (vérifier, supprimer, rétention, purge des orphelins) et gérer les
-# profils (ajout/modification/suppression dans le fichier de configuration).
+# archives (vérifier, supprimer, rétention, purge des orphelins), gérer les
+# profils (ajout/modification/suppression dans le fichier de configuration) et
+# planifier des sauvegardes automatiques (timers systemd --user).
 #
 # Toute la logique (config, vérification, instantanés, verrou, confirmations,
 # codes de retour) reste dans private-data_backup.sh ; cette interface ne fait
@@ -39,6 +40,9 @@ readonly ICON_TRASH=$'\uf1f8'
 readonly ICON_EYE=$'\uf06e'
 readonly ICON_INFO=$'\uf129'
 readonly ICON_CONFIG=$'\uf013'
+readonly ICON_CLOCK=$'\uf017'
+readonly ICON_PLAY=$'\uf04b'
+readonly ICON_LOCK=$'\uf023'
 
 # Profils (`show --porcelain`).
 declare -a P_NAME=() P_SRC=() P_CMD=() P_ARCH=() P_DATE=() P_SIZE=() P_EXCL=()
@@ -49,6 +53,12 @@ P_CMD_W=12
 
 # Archives (`list --porcelain`).
 declare -a A_GROUP=() A_DATE=() A_SIZE=() A_PATH=()
+
+# Sauvegardes automatiques (`timer-list --porcelain`).
+declare -a T_NAME=() T_FREQ=() T_WHEN=() T_NEXT=() T_STATE=() T_RESULT=()
+T_NAME_W=6
+T_FREQ_W=12
+T_NEXT_W=20
 
 # Sélections courantes.
 PICK_FILE=""
@@ -348,6 +358,235 @@ _pick_archive() {
 	PICK_FILE="${A_PATH[${pos}]}"
 	PICK_GROUP="${A_GROUP[${pos}]}"
 	return 0
+}
+
+# =============================================================================
+# SAUVEGARDES AUTOMATIQUES (timers systemd --user)
+# =============================================================================
+
+_load_timers() {
+	local out="" line="" f_name="" f_freq="" f_when="" f_next="" f_state="" f_result="" label=""
+	T_NAME=(); T_FREQ=(); T_WHEN=(); T_NEXT=(); T_STATE=(); T_RESULT=()
+	T_NAME_W=6
+	T_FREQ_W=12
+	T_NEXT_W=20
+	if ! out="$("${CLI}" timer-list --porcelain 2>/dev/null)"; then
+		return 1
+	fi
+	while IFS= read -r line; do
+		[[ -n ${line} ]] || continue
+		IFS=$'\t' read -r f_name f_freq f_when f_next f_state f_result <<<"${line}"
+		[[ -n ${f_name} ]] || continue
+		T_NAME+=("${f_name}")
+		T_FREQ+=("${f_freq}")
+		T_WHEN+=("${f_when}")
+		T_NEXT+=("${f_next}")
+		T_STATE+=("${f_state}")
+		T_RESULT+=("${f_result}")
+		((${#f_name} > T_NAME_W)) && T_NAME_W=${#f_name}
+		label="${f_freq} ${f_when}"
+		((${#label} > T_FREQ_W)) && T_FREQ_W=${#label}
+		((${#f_next} > T_NEXT_W)) && T_NEXT_W=${#f_next}
+	done <<<"${out}"
+	return 0
+}
+
+_timer_label() {
+	local i="${1}"
+	printf '%-*s %-*s %-*s %s' \
+		"${T_NAME_W}" "${T_NAME[${i}]}" \
+		"${T_FREQ_W}" "${T_FREQ[${i}]} ${T_WHEN[${i}]}" \
+		"${T_NEXT_W}" "${T_NEXT[${i}]}" \
+		"${T_RESULT[${i}]}"
+}
+
+_timer_pick() {
+	local -a labels=()
+	local i pick pos=-1
+	if ((${#T_NAME[@]} == 0)); then
+		gum style --border rounded --padding "0 2" --foreground 3 "${ICON_EMPTY}  Aucune planification."
+		_pause
+		return 1
+	fi
+	for i in "${!T_NAME[@]}"; do
+		labels+=("$(_timer_label "${i}")")
+	done
+	pick="$(gum choose --header "${ICON_CLOCK}  Choisir une planification" --cursor "❯ " "${labels[@]}")" || return 1
+	for i in "${!labels[@]}"; do
+		if [[ ${labels[${i}]} == "${pick}" ]]; then
+			pos="${i}"
+			break
+		fi
+	done
+	((pos < 0)) && return 1
+	printf '%s' "${pos}"
+	return 0
+}
+
+_linger_state() {
+	local out=""
+	out="$(loginctl show-user "${USER}" --property=Linger --value 2>/dev/null)" || out=""
+	printf '%s' "${out:-inconnu}"
+}
+
+_timer_edit() {
+	local pos="" name="" cur_pos=-1 freq="" time="" day="" existing="" summary="" choice=""
+	local i="" j=""
+	pos="$(_profile_pick)" || return 0
+	name="${P_NAME[${pos}]}"
+
+	# Valeurs actuelles, si le profil est déjà planifié.
+	for i in "${!T_NAME[@]}"; do
+		if [[ ${T_NAME[${i}]} == "${name}" ]]; then
+			cur_pos="${i}"
+			break
+		fi
+	done
+	if ((cur_pos >= 0)); then
+		freq="${T_FREQ[${cur_pos}]}"
+		# T_WHEN vaut « 18:30 » ou « dimanche 18:30 ».
+		if [[ ${freq} == "hebdomadaire" ]]; then
+			day="${T_WHEN[${cur_pos}]%% *}"
+			time="${T_WHEN[${cur_pos}]##* }"
+		else
+			time="${T_WHEN[${cur_pos}]}"
+		fi
+		existing="(actuelle : ${freq} ${T_WHEN[${cur_pos}]})"
+	else
+		freq="quotidien"
+		time="18:00"
+		existing="(aucune planification actuelle)"
+	fi
+
+	printf '\n%s %s\n' "${ICON_CLOCK}" "${name}"
+	if [[ ${freq} == "hebdomadaire" ]]; then
+		choice="$(gum choose --header "Fréquence ${existing}" "Hebdomadaire" "Quotidien")" || return 0
+	else
+		choice="$(gum choose --header "Fréquence ${existing}" "Quotidien" "Hebdomadaire")" || return 0
+	fi
+	case "${choice}" in
+	Quotidien*) freq="quotidien" ;;
+	Hebdomadaire*) freq="hebdomadaire" ;;
+	*) return 0 ;;
+	esac
+
+	if [[ ${freq} == "hebdomadaire" ]]; then
+		local -a jours=("Lundi" "Mardi" "Mercredi" "Jeudi" "Vendredi" "Samedi" "Dimanche")
+		local -a ordre=()
+		# Le jour courant en premier, pour valider d'un coup.
+		if [[ -n ${day} ]]; then
+			for j in "${jours[@]}"; do
+				if [[ ${j,,} == "${day}" ]]; then
+					ordre+=("${j}")
+				fi
+			done
+		fi
+		for j in "${jours[@]}"; do
+			[[ ${j,,} == "${day}" ]] && continue
+			ordre+=("${j}")
+		done
+		day="$(gum choose --header "Jour de la semaine" "${ordre[@]}")" || return 0
+	fi
+
+	time="$(gum input --header "Heure (HH:MM)" --value "${time}" --placeholder "18:00")" || return 0
+	[[ -n ${time} ]] || return 0
+
+	summary="${name} : ${freq}"
+	[[ ${freq} == "hebdomadaire" ]] && summary="${summary} ${day}"
+	summary="${summary} à ${time}"
+	gum style --border rounded --padding "0 2" "${ICON_CLOCK}  Planification" "" "${summary}"
+	gum confirm --default=false --affirmative "Enregistrer" --negative "Annuler" \
+		"Programmer cette sauvegarde automatique ?" || return 0
+	printf '\n'
+	if [[ ${freq} == "hebdomadaire" ]]; then
+		"${CLI}" timer-add "${name}" hebdomadaire "${day}" "${time}"
+	else
+		"${CLI}" timer-add "${name}" quotidien "${time}"
+	fi
+	_pause
+	return 0
+}
+
+_timer_remove() {
+	local pos="" name=""
+	pos="$(_timer_pick)" || return 0
+	name="${T_NAME[${pos}]}"
+	if ! gum confirm --default=false --affirmative "Supprimer" --negative "Annuler" \
+		"Supprimer la sauvegarde automatique de ${name} ? (les archives restent)"; then
+		return 0
+	fi
+	printf '\n'
+	"${CLI}" timer-remove "${name}" --yes
+	_pause
+	return 0
+}
+
+_timer_run() {
+	local pos="" name=""
+	pos="$(_timer_pick)" || return 0
+	name="${T_NAME[${pos}]}"
+	if ! gum confirm --default=false --affirmative "Lancer" --negative "Annuler" \
+		"Lancer la sauvegarde de ${name} maintenant ?"; then
+		return 0
+	fi
+	printf '\n'
+	"${CLI}" timer-run "${name}"
+	_pause
+	return 0
+}
+
+_timer_linger() {
+	printf '\n'
+	if ! gum confirm --default=false --affirmative "Autoriser" --negative "Annuler" \
+		"Autoriser les timers à tourner même session fermée (root) ?"; then
+		return 0
+	fi
+	printf '\n'
+	"${CLI}" timer-linger --yes
+	_pause
+	return 0
+}
+
+_screen_timers() {
+	local action="" count=0 linger="" cc="" i=""
+	local -a labels=()
+	while true; do
+		_clear
+		count=0
+		if _load_timers; then
+			count=${#T_NAME[@]}
+		fi
+		cc="$(_count "${count}" planification planifications)"
+		if ((count > 0)); then
+			labels=()
+			for i in "${!T_NAME[@]}"; do
+				labels+=("$(_timer_label "${i}")")
+			done
+			gum style --border rounded --padding "0 2" \
+				"Sauvegardes automatiques (${cc})" "" "${labels[@]}"
+		else
+			gum style --border rounded --padding "0 2" --foreground 3 \
+				"${ICON_EMPTY}  Aucune sauvegarde automatique."
+		fi
+		linger="$(_linger_state)"
+		if [[ ${linger} == "no" ]]; then
+			printf '\n'
+			gum style --foreground 3 "${ICON_WARN}  Linger inactif : les timers ne tournent que session ouverte."
+		fi
+		action="$(gum choose --header "${ICON_CLOCK}  Sauvegardes automatiques — que faire ?" --cursor "❯ " \
+			"${ICON_PLUS}  Programmer ou modifier un profil" \
+			"${ICON_TRASH}  Supprimer une planification" \
+			"${ICON_PLAY}  Lancer maintenant" \
+			"${ICON_LOCK}  Autoriser hors session (linger)" \
+			"Retour")" || return 0
+		case "${action}" in
+		*Programmer*) _timer_edit ;;
+		*Supprimer*) _timer_remove ;;
+		*Lancer*) _timer_run ;;
+		*Autoriser*) _timer_linger ;;
+		*) return 0 ;;
+		esac
+	done
 }
 
 # =============================================================================
@@ -920,6 +1159,10 @@ Configuration Modifier la destination (montage et sous-dossier), la
               la liste des fichiers dans le journal et le délai NFS —
               mêmes garde-fous que pour les profils.
 
+Automatique   Programmer une sauvegarde par profil (timer systemd
+              utilisateur), lister, modifier, supprimer, lancer maintenant
+              et activer le linger pour tourner hors session.
+
 OÙ SONT LES CHOSES
 ------------------
 Configuration : ${cfg}
@@ -1123,6 +1366,7 @@ _menu() {
 		"${ICON_RESTORE}  Restaurer" \
 		"${ICON_ARCHIVE}  Archives" \
 		"${ICON_USERS}  Profils" \
+		"${ICON_CLOCK}  Automatique" \
 		"${ICON_CONFIG}  Configuration" \
 		"${ICON_QUIT}  Quitter")" || return 1
 	# Correspondance par mot-clé : les icônes peuvent changer sans casser le menu.
@@ -1132,6 +1376,7 @@ _menu() {
 	*Restaurer*) _screen_restore ;;
 	*Archives*) _screen_archives ;;
 	*Profils*) _screen_profiles ;;
+	*Automatique*) _screen_timers ;;
 	*Configuration*) _screen_config ;;
 	*) return 1 ;;
 	esac
@@ -1158,6 +1403,7 @@ main() {
 		printf '  %-16s %s\n' ""              "cocher plusieurs archives), chiffrer les archives en clair,"
 		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
 		printf '  %-16s %s\n' "Profils"       "ajouter, modifier, retirer, adopter les orphelins, conflits"
+		printf '  %-16s %s\n' "Automatique"   "planifier des sauvegardes (timers systemd --user)"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
 		printf '  %-16s %s\n' "Description"   "présentation de l'outil"
 		printf '\nSécurité : vérification, instantanés, confirmations et verrou\n'

@@ -9,6 +9,10 @@
 #   private-data_backup.sh delete_old [--keep N] [--orphans] [--dry-run] [--yes]
 #   private-data_backup.sh show
 #   private-data_backup.sh list [PROFIL]
+#   private-data_backup.sh timer-add PROFIL quotidien HH:MM
+#   private-data_backup.sh timer-add PROFIL hebdomadaire JOUR HH:MM
+#   private-data_backup.sh timer-list | timer-remove PROFIL | timer-run PROFIL
+#   private-data_backup.sh timer-linger
 #   private-data_backup.sh help | --version
 #
 # Politique d'erreur : PAS de `set -e`. Il rend le comportement des fonctions
@@ -45,6 +49,9 @@ SCRIPTNAME="${0##*/}"
 SCRIPTNAME="${SCRIPTNAME%.sh}"
 readonly SCRIPTNAME
 
+SELF_PATH="$(readlink -f -- "${BASH_SOURCE[0]:-$0}" 2>/dev/null)" || SELF_PATH="${BASH_SOURCE[0]:-$0}"
+readonly SELF_PATH
+
 readonly CONFIG_BASENAME="private-data_backup.conf"
 readonly SNAPSHOT_SUBDIR="pre-restore"
 
@@ -56,6 +63,10 @@ VERIFY_DEFAULT=1
 SNAPSHOT_DEFAULT="auto"
 SNAPSHOT_MAX_MB=512
 NAS_TIMEOUT=20
+# Attente maximale du verrou (secondes). 0 = échec immédiat. Les services
+# planifiés la portent à 2 h pour que des timers simultanés s'enchaînent au
+# lieu d'échouer.
+LOCK_WAIT="${PRIVATE_BACKUP_LOCK_WAIT:-0}"
 ENCRYPT=""
 AGE_RECIPIENT=""
 AGE_IDENTITY=""
@@ -104,6 +115,7 @@ PORCELAIN=0
 ARCHIVE_FILE=""
 PLAN_FILE=""
 APPLY_PLAN=""
+SYSTEMCTL_BIN="${PRIVATE_BACKUP_SYSTEMCTL:-systemctl}"
 SNAPSHOT_MODE="auto"
 
 # Archives découvertes : triées par groupe puis date décroissante.
@@ -160,7 +172,12 @@ _acquire_lock() {
 		_ERR "impossible d'ouvrir le verrou ${lock_file}"
 		return 1
 	fi
-	if ! flock -n 9; then
+	if [[ ${LOCK_WAIT} =~ ^[0-9]+$ ]] && ((LOCK_WAIT > 0)); then
+		if ! flock -w "${LOCK_WAIT}" 9; then
+			_ERR "verrou occupé depuis plus de ${LOCK_WAIT} s (${lock_file})"
+			return 1
+		fi
+	elif ! flock -n 9; then
 		_ERR "une autre instance de ${SCRIPTNAME} est déjà en cours (${lock_file})"
 		return 1
 	fi
@@ -1147,6 +1164,12 @@ _usage() {
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "delete-archive" "${r}" "${d}" "FICHIER..." "${r}" "supprimer des archives"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "encrypt-archives" "${r}" "${d}" "[PROFIL...]" "${r}" "chiffrer les archives en clair (age)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "adopt-orphans" "${r}" "${d}" "[PROFIL...]" "${r}" "réintégrer les profils orphelins (dossier déduit)"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-add" "${r}" "${d}" "PROFIL quotidien HH:MM" "${r}" "planifier une sauvegarde (systemd --user)"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "" "${r}" "${d}" "PROFIL hebdomadaire JOUR HH:MM" "${r}" ""
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-remove" "${r}" "${d}" "PROFIL" "${r}" "supprimer la planification d'un profil"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-list" "${r}" "${d}" "[--porcelain]" "${r}" "lister les sauvegardes automatiques"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-run" "${r}" "${d}" "PROFIL" "${r}" "lancer la sauvegarde planifiée maintenant"
+	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "timer-linger" "${r}" "${d}" "" "${r}" "autoriser les timers hors session (root)"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-add" "${r}" "${d}" "NOM DOSSIER [BINAIRE] [EXCL]" "${r}" "ajouter ou modifier un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "profile-remove" "${r}" "${d}" "NOM" "${r}" "retirer un profil"
 	printf '  %b%-20s%b %b%-30s%b %s\n' "${g}" "config-set" "${r}" "${d}" "CLE=VALEUR..." "${r}" "modifier des paramètres"
@@ -1169,7 +1192,7 @@ _usage() {
 --purge-orphans|supprimer toutes les archives des profils hors configuration
 --snapshot|forcer l'instantané avant restauration
 --no-snapshot|interdire l'instantané avant restauration
---porcelain|sortie tabulée (interfaces) pour show et list
+--porcelain|sortie tabulée (interfaces) pour show, list et timer-list
 --archive FILE|restaurer cette archive précise (avec restore)
 --config FILE|utiliser ce fichier de configuration
 --plan FILE|écrire le plan d'adoption dans FILE (adopt-orphans)
@@ -2402,6 +2425,522 @@ adopt_orphans() {
 }
 
 # =============================================================================
+# SAUVEGARDES AUTOMATIQUES (timers systemd --user)
+# =============================================================================
+# Un template de service et un timer par profil, dans
+# ~/.config/systemd/user. Aucun privilège root : les timers tournent avec le
+# gestionnaire systemd de l'utilisateur. Sans « linger », ils ne s'exécutent
+# que pendant une session ouverte (timer-linger l'active).
+
+_timer_unit_dir() {
+	local base="${XDG_CONFIG_HOME:-${HOME}/.config}"
+	printf '%s' "${PRIVATE_BACKUP_UNIT_DIR:-${base}/systemd/user}"
+}
+
+_timer_unit() {
+	printf '%s@%s.timer' "${SCRIPTNAME}" "${1}"
+}
+
+_timer_service_unit() {
+	printf '%s@%s.service' "${SCRIPTNAME}" "${1}"
+}
+
+_timer_valid_time() {
+	[[ ${1} =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]
+}
+
+# Jour français ou anglais -> abréviation systemd (Mon…Sun).
+_timer_day() {
+	local d=""
+	d="$(printf '%s' "${1}" | tr '[:upper:]' '[:lower:]')"
+	d="${d//é/e}"; d="${d//è/e}"; d="${d//ê/e}"; d="${d//ë/e}"
+	d="${d//à/a}"; d="${d//â/a}"; d="${d//ä/a}"
+	d="${d//î/i}"; d="${d//ï/i}"
+	d="${d//ô/o}"; d="${d//ö/o}"
+	d="${d//û/u}"; d="${d//ü/u}"; d="${d//ù/u}"
+	d="${d//ç/c}"
+	case "${d}" in
+	lundi | lun | monday | mon) printf 'Mon' ;;
+	mardi | mar | tuesday | tue) printf 'Tue' ;;
+	mercredi | mer | wednesday | wed) printf 'Wed' ;;
+	jeudi | jeu | thursday | thu) printf 'Thu' ;;
+	vendredi | ven | friday | fri) printf 'Fri' ;;
+	samedi | sam | saturday | sat) printf 'Sat' ;;
+	dimanche | dim | sunday | sun) printf 'Sun' ;;
+	*) return 1 ;;
+	esac
+	return 0
+}
+
+# Abréviation systemd -> nom français (affichage).
+_timer_day_fr() {
+	case "${1}" in
+	Mon) printf 'lundi' ;;
+	Tue) printf 'mardi' ;;
+	Wed) printf 'mercredi' ;;
+	Thu) printf 'jeudi' ;;
+	Fri) printf 'vendredi' ;;
+	Sat) printf 'samedi' ;;
+	Sun) printf 'dimanche' ;;
+	*) printf '%s' "${1}" ;;
+	esac
+	return 0
+}
+
+# Écrit un fichier d'unité de façon atomique.
+_timer_put() {
+	local path="${1}" dir="" tmp=""
+	shift
+	dir="${path%/*}"
+	if ! mkdir -p -- "${dir}" 2>/dev/null; then
+		_ERR "dossier d'unités inaccessible : ${dir}"
+		return 1
+	fi
+	tmp="${path}.tmp.$$"
+	if ! printf '%s\n' "${@}" >"${tmp}" 2>/dev/null; then
+		rm -f -- "${tmp}"
+		_ERR "écriture impossible : ${path}"
+		return 1
+	fi
+	if ! mv -f -- "${tmp}" "${path}"; then
+		rm -f -- "${tmp}"
+		_ERR "écriture impossible : ${path}"
+		return 1
+	fi
+	return 0
+}
+
+# Template de service commun à tous les profils (%i = nom du profil).
+_timer_write_service() {
+	local cfg="${1}" dir="" path="" script="" cfgexec=""
+	dir="$(_timer_unit_dir)"
+	path="${dir}/${SCRIPTNAME}@.service"
+	script="${SELF_PATH//%/%%}"
+	if [[ -n ${cfg} ]]; then
+		cfgexec="--config \"${cfg//%/%%}\" "
+	fi
+	_timer_put "${path}" \
+		"[Unit]" \
+		"Description=Sauvegarde automatique du profil %i (${SCRIPTNAME})" \
+		"" \
+		"[Service]" \
+		"Type=oneshot" \
+		"Environment=PRIVATE_BACKUP_LOCK_WAIT=7200" \
+		"ExecStart=\"${script}\" ${cfgexec}backup %i" \
+		"TimeoutStartSec=12h" \
+		"Nice=10" \
+		"IOSchedulingClass=idle"
+}
+
+# Timer d'un profil. Les métadonnées (fréquence, heure, jour) sont conservées
+# dans un commentaire pour que timer-list n'ait pas à réinterpréter OnCalendar.
+_timer_write_timer() {
+	local name="${1}" freq="${2}" time="${3}" day="${4}" dir="" path="" cal="" desc="" meta="" dayfr=""
+	dayfr="$(_timer_day_fr "${day}")"
+	dir="$(_timer_unit_dir)"
+	path="${dir}/$(_timer_unit "${name}")"
+	if [[ ${freq} == "hebdomadaire" ]]; then
+		cal="${day} *-*-* ${time}:00"
+		desc="hebdomadaire (${dayfr})"
+		meta="# private-data-backup: frequence=hebdomadaire heure=${time} jour=${dayfr}"
+	else
+		cal="*-*-* ${time}:00"
+		desc="quotidienne"
+		meta="# private-data-backup: frequence=quotidien heure=${time}"
+	fi
+	_timer_put "${path}" \
+		"${meta}" \
+		"" \
+		"[Unit]" \
+		"Description=Sauvegarde ${desc} du profil ${name}" \
+		"" \
+		"[Timer]" \
+		"OnCalendar=${cal}" \
+		"Persistent=true" \
+		"AccuracySec=1min" \
+		"" \
+		"[Install]" \
+		"WantedBy=timers.target"
+}
+
+# Métadonnées d'un fichier timer : « fréquence<TAB>heure<TAB>jour ».
+_timer_meta() {
+	local file="${1}" meta="" kv="" key="" val="" freq="?" time="?" day=""
+	local -a champs=()
+	meta="$(sed -n 's/^# private-data-backup: //p' "${file}" 2>/dev/null | head -n 1)" || meta=""
+	if [[ -n ${meta} ]]; then
+		read -r -a champs <<<"${meta}"
+		for kv in "${champs[@]}"; do
+			key="${kv%%=*}"
+			val="${kv#*=}"
+			case "${key}" in
+			frequence) freq="${val}" ;;
+			heure) time="${val}" ;;
+			jour) day="${val}" ;;
+			*) ;;
+			esac
+		done
+	fi
+	printf '%s\t%s\t%s' "${freq}" "${time}" "${day}"
+}
+
+_timer_state() {
+	local unit="${1}" st=""
+	st="$("${SYSTEMCTL_BIN}" --user is-active "${unit}" 2>/dev/null)" || true
+	printf '%s' "${st:--}"
+}
+
+_timer_next() {
+	local unit="${1}" out=""
+	out="$("${SYSTEMCTL_BIN}" --user show -p NextElapseUSecRealtime --value "${unit}" 2>/dev/null)" || out=""
+	case "${out}" in
+	"" | n/a | 0) printf '%s' "-" ;;
+	*) printf '%s' "${out}" ;;
+	esac
+}
+
+_timer_result() {
+	# « success » est aussi renvoyé pour un service jamais exécuté : on
+	# s'appuie sur la date de dernier démarrage pour distinguer les deux.
+	local unit="${1}" started="" out=""
+	started="$("${SYSTEMCTL_BIN}" --user show -p ExecMainStartTimestamp --value "${unit}" 2>/dev/null)" || started=""
+	case "${started}" in
+	"" | n/a) printf '%s' "-"; return 0 ;;
+	*) ;;
+	esac
+	out="$("${SYSTEMCTL_BIN}" --user show -p Result --value "${unit}" 2>/dev/null)" || out=""
+	printf '%s' "${out:--}"
+}
+
+_timer_exists() {
+	local dir="" unit=""
+	dir="$(_timer_unit_dir)"
+	unit="$(_timer_unit "${1}")"
+	[[ -f "${dir}/${unit}" ]]
+}
+
+_timer_user() {
+	local u="${USER:-}"
+	if [[ -z ${u} ]]; then
+		u="$(id -un)" || u="${LOGNAME:-utilisateur}"
+	fi
+	printf '%s' "${u}"
+}
+
+_linger_state() {
+	local out="" user=""
+	user="$(_timer_user)"
+	if command -v loginctl >/dev/null 2>&1; then
+		out="$(loginctl show-user "${user}" --property=Linger --value 2>/dev/null)" || out=""
+	fi
+	case "${out}" in
+	yes | no) printf '%s' "${out}" ;;
+	*) printf 'inconnu' ;;
+	esac
+}
+
+_timer_need_systemd() {
+	if ! command -v "${SYSTEMCTL_BIN}" >/dev/null 2>&1; then
+		_ERR "systemctl introuvable : les timers nécessitent systemd"
+		return 1
+	fi
+	return 0
+}
+
+# Avertit si les timers ne survivront pas à la fermeture de session.
+_timer_linger_warn() {
+	local st=""
+	st="$(_linger_state)"
+	if [[ ${st} == "no" ]]; then
+		_WARN "linger désactivé : les timers ne tournent que session ouverte"
+		_INFO "pour les exécuter en continu : ${SCRIPTNAME} timer-linger"
+	fi
+	return 0
+}
+
+timer_add() {
+	local name="${1:-}" freq="${2:-}" a3="${3:-}" a4="${4:-}"
+	local time="" day="" dayfr="" dir="" path="" unit="" cfg="" rc=0
+	name="${name^^}"
+	if ! _known_profile "${name}"; then
+		_ERR "profil inconnu : ${name} (voir show)"
+		return 2
+	fi
+	freq="$(printf '%s' "${freq}" | tr '[:upper:]' '[:lower:]')"
+	case "${freq}" in
+	quotidien | daily | jour)
+		freq="quotidien"
+		time="${a3}"
+		;;
+	hebdomadaire | weekly | semaine)
+		freq="hebdomadaire"
+		day="$(_timer_day "${a3}")" || {
+			_ERR "jour invalide : ${a3} (lundi…dimanche)"
+			return 2
+		}
+		time="${a4}"
+		;;
+	*)
+		_ERR "fréquence attendue : quotidien HH:MM ou hebdomadaire JOUR HH:MM"
+		return 2
+		;;
+	esac
+	if ! _timer_valid_time "${time}"; then
+		_ERR "heure invalide : ${time:-absente} (format HH:MM, 00:00–23:59)"
+		return 2
+	fi
+	if ! _timer_need_systemd; then
+		return 1
+	fi
+
+	dir="$(_timer_unit_dir)"
+	path="${dir}/$(_timer_unit "${name}")"
+	unit="$(_timer_unit "${name}")"
+	svc="$(_timer_service_unit "${name}")"
+	if [[ -n ${CFG_FILE} ]]; then
+		cfg="$(readlink -f -- "${CFG_FILE}" 2>/dev/null)" || cfg="${CFG_FILE}"
+	fi
+
+	if ((DRY_RUN == 1)); then
+		_INFO "profil   : ${name}"
+		_INFO "service  : ${dir}/${SCRIPTNAME}@.service"
+		_INFO "timer    : ${path}"
+		if [[ ${freq} == "hebdomadaire" ]]; then
+			_INFO "calendrier : ${day} *-*-* ${time}:00"
+		else
+			_INFO "calendrier : *-*-* ${time}:00"
+		fi
+		_INFO "commandes : ${SYSTEMCTL_BIN} --user daemon-reload && ${SYSTEMCTL_BIN} --user enable --now ${unit}"
+		return 0
+	fi
+
+	if ! _timer_write_service "${cfg}"; then
+		return 1
+	fi
+	if ! _timer_write_timer "${name}" "${freq}" "${time}" "${day}"; then
+		return 1
+	fi
+	if ! "${SYSTEMCTL_BIN}" --user daemon-reload 2>/dev/null; then
+		_WARN "daemon-reload a échoué (les unités existent, réessaie plus tard)"
+		rc=1
+	fi
+	if ! "${SYSTEMCTL_BIN}" --user enable --now "${unit}" 2>&1; then
+		_ERR "activation impossible : ${unit}"
+		return 1
+	fi
+	if [[ ${freq} == "hebdomadaire" ]]; then
+		dayfr="$(_timer_day_fr "${day}")"
+		_OK "${name} : sauvegarde hebdomadaire le ${dayfr} à ${time}"
+	else
+		_OK "${name} : sauvegarde quotidienne à ${time}"
+	fi
+	_INFO "timer actif : ${unit}"
+	_timer_linger_warn
+	return "${rc}"
+}
+
+timer_remove() {
+	local name="${1:-}" dir="" path="" unit="" rc=0
+	name="${name^^}"
+	if [[ -z ${name} ]]; then
+		_ERR "nom de profil manquant"
+		return 2
+	fi
+	if ! _timer_exists "${name}"; then
+		_ERR "aucune planification pour ${name}"
+		return 2
+	fi
+	if ! _timer_need_systemd; then
+		return 1
+	fi
+	dir="$(_timer_unit_dir)"
+	path="${dir}/$(_timer_unit "${name}")"
+	unit="$(_timer_unit "${name}")"
+
+	if ((DRY_RUN == 1)); then
+		_INFO "désactiverait ${unit} et supprimerait ${path}"
+		[[ -f ${dir}/${SCRIPTNAME}@.service ]] && _INFO "conserverait le service ${SCRIPTNAME}@.service (partagé)"
+		return 0
+	fi
+	if ! _confirm "Supprimer la sauvegarde automatique de ${name} ?"; then
+		_INFO "annulé — planification inchangée"
+		return 3
+	fi
+
+	if ! "${SYSTEMCTL_BIN}" --user disable --now "${unit}" 2>&1; then
+		_WARN "désactivation de ${unit} incomplète"
+		rc=1
+	fi
+	if ! rm -f -- "${path}"; then
+		_ERR "suppression impossible : ${path}"
+		return 1
+	fi
+	# Le template de service ne sert que s'il reste au moins un timer.
+	if ! compgen -G "${dir}/${SCRIPTNAME}@*.timer" >/dev/null; then
+		rm -f -- "${dir}/${SCRIPTNAME}@.service" 2>/dev/null
+	fi
+	if ! "${SYSTEMCTL_BIN}" --user daemon-reload 2>/dev/null; then
+		_WARN "daemon-reload a échoué"
+		rc=1
+	fi
+	_OK "${name} : sauvegarde automatique supprimée"
+	return "${rc}"
+}
+
+timer_run() {
+	local name="${1:-}" svc="" out=""
+	name="${name^^}"
+	if ! _timer_exists "${name}"; then
+		_ERR "aucune planification pour ${name}"
+		return 2
+	fi
+	if ! _timer_need_systemd; then
+		return 1
+	fi
+	svc="$(_timer_service_unit "${name}")"
+	if ((DRY_RUN == 1)); then
+		_INFO "lancerait ${SYSTEMCTL_BIN} --user start ${svc}"
+		return 0
+	fi
+	# --no-block : le service peut durer des heures, on ne bloque pas le terminal.
+	if ! out="$("${SYSTEMCTL_BIN}" --user start --no-block "${svc}" 2>&1)"; then
+		_ERR "lancement impossible : ${svc}"
+		[[ -n ${out} ]] && printf '%s\n' "${out}" >&2
+		return 1
+	fi
+	_OK "${name} : sauvegarde lancée (service ${svc})"
+	_INFO "suivi : journalctl --user -u ${svc} -f"
+	return 0
+}
+
+timer_list() {
+	local dir="" file="" name="" meta="" freq="" time="" day="" when="" unit="" svc="" st="" next="" res="" n=0
+	local -a noms=()
+	dir="$(_timer_unit_dir)"
+	if ! compgen -G "${dir}/${SCRIPTNAME}@*.timer" >/dev/null; then
+		if ((PORCELAIN == 0)); then
+			_INFO "aucune sauvegarde automatique"
+		fi
+		return 0
+	fi
+	while IFS= read -r file; do
+		[[ -n ${file} ]] && noms+=("${file}")
+	done < <(compgen -G "${dir}/${SCRIPTNAME}@*.timer" | sort || true)
+
+	if ((PORCELAIN == 1)); then
+		for file in "${noms[@]}"; do
+			name="${file##*/}"
+			name="${name#"${SCRIPTNAME}"@}"
+			name="${name%.timer}"
+			meta="$(_timer_meta "${file}")"
+			IFS=$'\t' read -r freq time day <<<"${meta}"
+			when="${time}"
+			[[ ${freq} == "hebdomadaire" ]] && when="${day} ${time}"
+			unit="$(_timer_unit "${name}")"
+			svc="$(_timer_service_unit "${name}")"
+			st="$(_timer_state "${unit}")"
+			next="$(_timer_next "${unit}")"
+			res="$(_timer_result "${svc}")"
+			printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${name}" "${freq}" "${when}" "${next}" "${st}" "${res}"
+		done
+		return 0
+	fi
+
+	local -a col_name=() col_freq=() col_next=() col_state=() col_res=()
+	local w_name=6 w_freq=10 w_next=8
+	for file in "${noms[@]}"; do
+		name="${file##*/}"
+		name="${name#"${SCRIPTNAME}"@}"
+		name="${name%.timer}"
+		meta="$(_timer_meta "${file}")"
+		IFS=$'\t' read -r freq time day <<<"${meta}"
+		when="${time}"
+		[[ ${freq} == "hebdomadaire" ]] && when="${day} ${time}"
+		unit="$(_timer_unit "${name}")"
+		svc="$(_timer_service_unit "${name}")"
+		st="$(_timer_state "${unit}")"
+		next="$(_timer_next "${unit}")"
+		res="$(_timer_result "${svc}")"
+		col_name+=("${name}")
+		col_freq+=("${freq} ${when}")
+		col_next+=("${next}")
+		col_state+=("${st}")
+		col_res+=("${res}")
+		((${#name} > w_name)) && w_name=${#name}
+		((${#freq} + 1 + ${#when} > w_freq)) && w_freq=$((${#freq} + 1 + ${#when}))
+		((${#next} > w_next)) && w_next=${#next}
+		n=$((n + 1))
+	done
+
+	printf '\n%b%-*s %-*s %-*s %-9s %s%b\n' "${C_BOLD}" "${w_name}" "PROFIL" "${w_freq}" "FRÉQUENCE" "${w_next}" "PROCHAIN" "ÉTAT" "DERNIER" "${C_RESET}"
+	local idx=0
+	for idx in "${!col_name[@]}"; do
+		printf '%-*s %-*s %-*s %-9s %s\n' \
+			"${w_name}" "${col_name[${idx}]}" "${w_freq}" "${col_freq[${idx}]}" \
+			"${w_next}" "${col_next[${idx}]}" "${col_state[${idx}]}" "${col_res[${idx}]}"
+	done
+
+	local linger=""
+	linger="$(_linger_state)"
+	printf '\n'
+	case "${linger}" in
+	yes) _INFO "linger actif : les timers tournent même session fermée" ;;
+	no)
+		_WARN "linger inactif : les timers ne tournent que session ouverte"
+		_INFO "activer : ${SCRIPTNAME} timer-linger"
+		;;
+	*) _WARN "état du linger indéterminé (loginctl indisponible)" ;;
+	esac
+	# Signale un template pointant vers un autre emplacement du script.
+	file="${dir}/${SCRIPTNAME}@.service"
+	if [[ -f ${file} ]] && ! grep -qF "${SELF_PATH//%/%%}" "${file}" 2>/dev/null; then
+		_WARN "le service pointe vers un autre chemin que ${SELF_PATH} — relance timer-add"
+	fi
+	local cn=""
+	cn="$(_count "${n}" "planification enregistrée" "planifications enregistrées")"
+	_INFO "${cn} : ${dir}"
+	return 0
+}
+
+timer_linger() {
+	local st="" out="" user=""
+	user="$(_timer_user)"
+	st="$(_linger_state)"
+	if [[ ${st} == "yes" ]]; then
+		_INFO "linger déjà actif pour ${user}"
+		return 0
+	fi
+	if ! command -v loginctl >/dev/null 2>&1; then
+		_ERR "loginctl introuvable (paquet systemd)"
+		return 1
+	fi
+	if ((DRY_RUN == 1)); then
+		_INFO "exécuterait : pkexec loginctl enable-linger ${user}"
+		return 0
+	fi
+	if ! command -v pkexec >/dev/null 2>&1; then
+		_ERR "pkexec introuvable : exécute « loginctl enable-linger ${user} » en root"
+		return 1
+	fi
+	if ! _confirm "Autoriser les timers à tourner sans session ouverte (root) ?"; then
+		_INFO "annulé — linger inchangé"
+		return 3
+	fi
+	if ! out="$(pkexec loginctl enable-linger "${user}" 2>&1)"; then
+		_ERR "activation du linger refusée ou impossible"
+		[[ -n ${out} ]] && printf '%s\n' "${out}" >&2
+		return 1
+	fi
+	st="$(_linger_state)"
+	if [[ ${st} == "yes" ]]; then
+		_OK "linger activé : les timers tournent même session fermée"
+		return 0
+	fi
+	_WARN "linger demandé mais état toujours « ${st} »"
+	return 1
+}
+
+# =============================================================================
 # PROFILS (écriture dans le fichier de configuration)
 # =============================================================================
 
@@ -2459,6 +2998,9 @@ profile_remove() {
 	if ! _config_save; then
 		_ERR "${name} : modification NON enregistrée"
 		return 1
+	fi
+	if _timer_exists "${name}"; then
+		_WARN "sauvegarde automatique toujours active : ${SCRIPTNAME} timer-remove ${name}"
 	fi
 	_WARN "${name} retiré ; ses archives restent sur le NAS (orphelines : delete_old --purge-orphans)"
 	return 0
@@ -2825,7 +3367,7 @@ main() {
 	fi
 
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|adopt-orphans|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
+	backup|restore|rollback|delete_old|show|list|verify|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-list|timer-run|timer-linger|profile-add|profile-remove|config-set|config-path|config-check|help|"") ;;
 	*)
 		_ERR "commande inconnue : ${cmd}"
 		printf '\n' >&2
@@ -2891,7 +3433,7 @@ main() {
 	# Les commandes de consultation (`show`, `list`, `config-path`…) sont
 	# appelées en boucle par la TUI : elles ne créent pas de journal.
 	case "${cmd}" in
-	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
+	backup|restore|rollback|delete_old|delete-archive|encrypt-archives|adopt-orphans|timer-add|timer-remove|timer-run|timer-linger|verify|profile-add|profile-remove|config-set) LOG_RUN=1 ;;
 	*) LOG_RUN=0 ;;
 	esac
 	if ((LOG_RUN == 1)); then
@@ -2964,6 +3506,26 @@ main() {
 		;;
 	adopt-orphans)
 		adopt_orphans "${positional[@]}"
+		rc=$?
+		;;
+	timer-add)
+		timer_add "${positional[0]:-}" "${positional[1]:-}" "${positional[2]:-}" "${positional[3]:-}"
+		rc=$?
+		;;
+	timer-remove)
+		timer_remove "${positional[0]:-}"
+		rc=$?
+		;;
+	timer-list)
+		timer_list
+		rc=$?
+		;;
+	timer-run)
+		timer_run "${positional[0]:-}"
+		rc=$?
+		;;
+	timer-linger)
+		timer_linger
 		rc=$?
 		;;
 	profile-add)

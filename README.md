@@ -53,6 +53,12 @@ private-data_backup.sh verify FICHIER
 private-data_backup.sh delete-archive FICHIER... [--yes] [--dry-run]
 private-data_backup.sh encrypt-archives [PROFIL...] [--dry-run] [--yes]
 private-data_backup.sh adopt-orphans [PROFIL...] [--dry-run] [--yes]
+private-data_backup.sh timer-add PROFIL quotidien HH:MM
+private-data_backup.sh timer-add PROFIL hebdomadaire JOUR HH:MM
+private-data_backup.sh timer-remove PROFIL
+private-data_backup.sh timer-list [--porcelain]
+private-data_backup.sh timer-run PROFIL
+private-data_backup.sh timer-linger
 private-data_backup.sh profile-add NOM DOSSIER [BINAIRE] [EXCLUSIONS]
 private-data_backup.sh profile-remove NOM
 private-data_backup.sh config-set CLE=VALEUR...
@@ -64,10 +70,38 @@ private-data_backup.sh help | --version
 Interface texte :
 
 ```sh
-private-data_backup-tui.sh      # Description / Sauvegarder / Restaurer / Archives / Profils / Configuration
+private-data_backup-tui.sh      # Description / Sauvegarder / Restaurer / Archives / Profils / Automatique / Configuration
 ```
 
 Codes de sortie : `0` succès, `1` échec, `2` usage ou configuration invalide, `3` opération annulée.
+
+## Sauvegardes automatiques
+
+Un timer systemd **utilisateur** par profil (aucun root) :
+
+```sh
+private-data_backup.sh timer-add DOCUMENTS quotidien 18:30
+private-data_backup.sh timer-add IMAGES hebdomadaire dimanche 03:00
+private-data_backup.sh timer-list
+private-data_backup.sh timer-run DOCUMENTS     # lancer maintenant
+private-data_backup.sh timer-remove DOCUMENTS  # retirer la planification
+```
+
+Les unités sont écrites dans `~/.config/systemd/user/`
+(`private-data_backup@.service` et `private-data_backup@PROFIL.timer`), puis
+activées avec `systemctl --user enable --now`. Le service utilise le chemin
+absolu du script et le fichier de configuration chargé.
+
+Sans session ouverte, les timers ne tournent pas. Pour les exécuter en
+continu, activer le linger (une fois, en root) :
+
+```sh
+private-data_backup.sh timer-linger
+```
+
+`timer-list` affiche la fréquence, la prochaine exécution, l'état, le dernier
+résultat et rappelle l'état du linger. La TUI expose les mêmes actions dans
+l'écran **Automatique**.
 
 ## Configuration
 
@@ -98,4 +132,7 @@ d'un coup (code retour 1) : `bash`, `tar`, `find`, `sort`, `awk`, `stat`,
 |---|---|
 | `age` | le chiffrement est activé (`ENCRYPT=age`) |
 | `gum` | lancement de l'interface texte |
+| `systemctl` / `systemd` | utilisation des sauvegardes automatiques (`timer-*`) |
+| `loginctl` | contrôle et activation du linger |
+| `pkexec` | `timer-linger` (élévation pour `loginctl enable-linger`) |
 | `awk` | interface texte (mise en forme des tailles) |

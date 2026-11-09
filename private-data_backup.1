@@ -87,6 +87,34 @@ est déduit de l'archive la plus récente (une racine unique est exigée), puis
 .BR SOURCES .
 Les chevauchements de dossiers entre profils sont signalés.
 .TP
+.B timer-add \fIPROFIL quotidien HH:MM\fR
+Programme une sauvegarde automatique quotidienne avec un timer systemd
+utilisateur (aucun privilège root). Un service modèle
+.IR private\-data\_backup@.service
+et un timer par profil sont écrits dans
+.IR ~/.config/systemd/user .
+.TP
+.B timer-add \fIPROFIL hebdomadaire JOUR HH:MM\fR
+Idem, une fois par semaine ; JOUR accepte lundi…dimanche (ou Mon…Sun).
+.TP
+.B timer-remove \fIPROFIL\fR
+Désactive et supprime la planification d'un profil ; les archives déjà
+présentes restent inchangées.
+.TP
+.B timer-list
+Liste les planifications : fréquence, prochaine exécution, état et dernier
+résultat. L'état du
+.B linger
+est rappelé en fin de liste.
+.TP
+.B timer-run \fIPROFIL\fR
+Lance immédiatement le service de sauvegarde planifié (sans attendre le
+timer).
+.TP
+.B timer-linger
+Autorise les timers à tourner même sans session ouverte, via
+.BR "pkexec loginctl enable-linger" .
+.TP
 .B profile-add \fINOM DOSSIER \fR[\fIBINAIRE\fR] [\fIEXCLUSIONS\fR]
 Ajoute ou modifie un profil dans le fichier de configuration.
 .TP
@@ -142,7 +170,7 @@ Interdire l'instantané avant restauration.
 .TP
 .B \-\-porcelain
 Sortie tabulée stable, destinée aux interfaces
-.RB ( show " et " list ).
+.RB ( show ", " list " et " timer-list ).
 .TP
 .BI \-\-archive " FICHIER"
 Restaurer cette archive précise (avec
@@ -198,6 +226,15 @@ et
 .TP
 .B ~/.local/share/private\-data\_backup/*.log
 Journaux horodatés.
+.TP
+.B ~/.config/systemd/user/private\-data\_backup@.service
+Service modèle des sauvegardes automatiques (ExecStart absolu).
+.TP
+.B ~/.config/systemd/user/private\-data\_backup@\fIPROFIL\fR.timer
+Timer d'un profil (OnCalendar, Persistent).
+.TP
+.B ~/.config/systemd/user/private\-data\_backup@\fIPROFIL\fR.service
+Instance du service créée par systemd pour le timer.
 .TP
 .BR "$XDG_RUNTIME_DIR/private\-data\_backup.\fIUID\fR.lock"
 Verrou d'exclusion mutuelle.
