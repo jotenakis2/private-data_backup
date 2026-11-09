@@ -1887,7 +1887,9 @@ restore() {
 		return 0
 	fi
 	if ((choice == all_idx)); then
-		if ! _confirm "Restaurer TOUS les profils (écrasement de ~/Documents, ~/Projects, ~/.ssh…) ?"; then
+		local liste=""
+		liste="$(printf '%s, ' "${profils[@]}")"
+		if ! _confirm "Restaurer TOUS les profils (${liste%, }) ?"; then
 			_INFO "annulé"
 			return 0
 		fi

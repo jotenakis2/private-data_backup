@@ -98,7 +98,7 @@ _fmt_dt() {
 
 _pause() {
 	printf '\n'
-	read -r -s -n 1 -p "  Entrée pour revenir au menu…" || true
+	read -r -s -n 1 -p "  Entrée pour revenir au menu" || true
 	printf '\n'
 }
 
@@ -517,7 +517,7 @@ _profile_inputs() {
 	[[ -n ${PF_NAME} ]] || return 1
 
 	where="$(gum choose --header "Dossier à sauvegarder" \
-		"Choisir dans ${HOME}…" "Saisir un chemin relatif…")" || return 1
+		"Choisir dans ${HOME}" "Saisir un chemin relatif")" || return 1
 	if [[ ${where} == "Choisir"* ]]; then
 		picked="$(gum file --directory --all --height 18 \
 			--header "Dossier (${HOME})" "${HOME}")" || return 1
