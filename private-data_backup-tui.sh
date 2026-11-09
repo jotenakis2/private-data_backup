@@ -235,20 +235,34 @@ _load_archives() {
 	return 0
 }
 
-# Lit une variable simple (NAS, BACKUP_SUBDIR…) dans le fichier de config.
-_config_get() {
-	local key="${1:-}" file="" val=""
-	[[ -n ${key} ]] || return 1
+# Affiche la configuration sous forme CLE=VALEUR, en un seul sous-processus.
+_config_dump() {
+	local file=""
 	file="$("${CLI}" config-path 2>/dev/null)" || return 1
-	[[ -n ${file} ]] || return 1
-	val="$(
+	[[ -n ${file} ]] && [[ -r ${file} ]] || return 1
+	(
 		set +u
 		# shellcheck source=/dev/null # fichier de configuration de l'utilisateur
 		source "${file}" >/dev/null 2>&1 || exit 1
-		printf '%s' "${!key}"
-	)" || return 1
-	printf '%s' "${val}"
-	return 0
+		local k
+		for k in NAS BACKUP_SUBDIR KEEP_DEFAULT VERIFY_DEFAULT SNAPSHOT_DEFAULT \
+			SNAPSHOT_MAX_MB NAS_TIMEOUT LOG_FILES ENCRYPT AGE_RECIPIENT AGE_IDENTITY; do
+			printf '%s=%s\n' "${k}" "${!k}"
+		done
+	)
+}
+
+# Lit une variable simple de la configuration.
+_config_get() {
+	local key="${1:-}" k="" v=""
+	[[ -n ${key} ]] || return 1
+	while IFS='=' read -r k v; do
+		if [[ ${k} == "${key}" ]]; then
+			printf '%s' "${v}"
+			return 0
+		fi
+	done < <(_config_dump || true)
+	return 1
 }
 
 _error_text() {
@@ -565,10 +579,13 @@ _archives_encrypt() {
 }
 
 _archives_retention() {
-	local out="" rc=0
+	local out="" rc=0 tmp=""
+	tmp="$(mktemp)" || return 0
 	printf '\n'
-	out="$("${CLI}" delete_old --dry-run 2>&1)" || rc=$?
-	printf '%s\n' "${out}"
+	"${CLI}" delete_old --dry-run 2>&1 | tee "${tmp}"
+	rc=${PIPESTATUS[0]}
+	out="$(cat "${tmp}")"
+	rm -f -- "${tmp}"
 	if ((rc != 0)) || [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
 		_pause
 		return 0
@@ -584,10 +601,13 @@ _archives_retention() {
 }
 
 _archives_purge() {
-	local out="" rc=0
+	local out="" rc=0 tmp=""
+	tmp="$(mktemp)" || return 0
 	printf '\n'
-	out="$("${CLI}" delete_old --purge-orphans --dry-run --no-verify 2>&1)" || rc=$?
-	printf '%s\n' "${out}"
+	"${CLI}" delete_old --purge-orphans --dry-run --no-verify 2>&1 | tee "${tmp}"
+	rc=${PIPESTATUS[0]}
+	out="$(cat "${tmp}")"
+	rm -f -- "${tmp}"
 	if ((rc != 0)) || [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
 		_pause
 		return 0
@@ -868,17 +888,23 @@ EOF
 # =============================================================================
 
 _config_values_load() {
-	CFG_NAS="$(_config_get NAS)"
-	CFG_SUB="$(_config_get BACKUP_SUBDIR)"
-	CFG_KEEP="$(_config_get KEEP_DEFAULT)"
-	CFG_VERIFY="$(_config_get VERIFY_DEFAULT)"
-	CFG_SNAP="$(_config_get SNAPSHOT_DEFAULT)"
-	CFG_SNAP_MAX="$(_config_get SNAPSHOT_MAX_MB)"
-	CFG_TIMEOUT="$(_config_get NAS_TIMEOUT)"
-	CFG_ENCRYPT="$(_config_get ENCRYPT)"
-	CFG_AGE_ID="$(_config_get AGE_IDENTITY)"
-	CFG_AGE="$(_config_get AGE_RECIPIENT)"
-	CFG_LOG_FILES="$(_config_get LOG_FILES)"
+	local k="" v=""
+	while IFS='=' read -r k v; do
+		case "${k}" in
+		NAS) CFG_NAS="${v}" ;;
+		BACKUP_SUBDIR) CFG_SUB="${v}" ;;
+		KEEP_DEFAULT) CFG_KEEP="${v}" ;;
+		VERIFY_DEFAULT) CFG_VERIFY="${v}" ;;
+		SNAPSHOT_DEFAULT) CFG_SNAP="${v}" ;;
+		SNAPSHOT_MAX_MB) CFG_SNAP_MAX="${v}" ;;
+		NAS_TIMEOUT) CFG_TIMEOUT="${v}" ;;
+		LOG_FILES) CFG_LOG_FILES="${v}" ;;
+		ENCRYPT) CFG_ENCRYPT="${v}" ;;
+		AGE_RECIPIENT) CFG_AGE="${v}" ;;
+		AGE_IDENTITY) CFG_AGE_ID="${v}" ;;
+		*) ;;
+		esac
+	done < <(_config_dump || true)
 	return 0
 }
 

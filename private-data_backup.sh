@@ -591,7 +591,7 @@ _config_write_block() {
 	rc=$?
 	if ((rc != 0)); then
 		rm -f -- "${tmp}"
-		_ERR "bloc « ${name} » introuvable dans ${file}"
+		_ERR "bloc « ${name} » introuvable : le fichier doit contenir « # >>> ${name} » et « # <<< ${name} »"
 		return 1
 	fi
 	if ! mv -f -- "${tmp}" "${file}"; then
@@ -1000,10 +1000,13 @@ _verify_archive() {
 		fi
 		rc=$?
 		((rc == 0)) && return 0
-		if ! _decrypt "${f}" >/dev/null 2>&1; then
-			return 2
-		fi
-		return 1
+		# Distinguer « clé absente » (indécidable) de « archive corrompue ».
+		local err=""
+		err="$(_decrypt "${f}" 2>&1 >/dev/null)" || true
+		case "${err}" in
+		*"no identity matched"*) return 2 ;;
+		*) return 1 ;;
+		esac
 	fi
 
 	if ((listing == 1)); then
