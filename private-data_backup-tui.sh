@@ -304,11 +304,12 @@ _error_text() {
 # =============================================================================
 
 _profile_header() {
-	printf '%-*s │ %-*s │ %-*s │ %s' \
-		"${P_NAME_W}" "PROFIL" \
-		"${P_SRC_W}" "DOSSIER" \
-		"${P_CMD_W}" "BINAIRE" \
-		"DERNIÈRE ARCHIVE"
+	_pad "PROFIL" "${P_NAME_W}"
+	printf ' │ '
+	_pad "DOSSIER" "${P_SRC_W}"
+	printf ' │ '
+	_pad "BINAIRE" "${P_CMD_W}"
+	printf ' │ %s' "DERNIÈRE ARCHIVE"
 }
 
 _profile_rule() {
@@ -321,19 +322,21 @@ _profile_rule() {
 }
 
 _label() {
-	local i="${1}" line="" when="" size="" cmd=""
+	local i="${1}" line="" when="" size="" cmd="" c_name="" c_src="" c_cmd=""
 	# Colonne « binaire surveillé » : le nom du processus, ou un tiret.
 	cmd="${P_CMD[${i}]:--}"
 	if [[ -n ${P_ARCH[${i}]} ]]; then
 		when="$(_fmt_dt "${P_DATE[${i}]}")"
 		size="$(_human "${P_SIZE[${i}]}")"
-		line="$(printf '%-*s │ %-*s │ %-*s │ %s  (%s)' \
-			"${P_NAME_W}" "${P_NAME[${i}]}" "${P_SRC_W}" "${P_SRC[${i}]}" \
-			"${P_CMD_W}" "${cmd}" "${when}" "${size}")"
+		c_name="$(_pad "${P_NAME[${i}]}" "${P_NAME_W}")"
+		c_src="$(_pad "${P_SRC[${i}]}" "${P_SRC_W}")"
+		c_cmd="$(_pad "${cmd}" "${P_CMD_W}")"
+		line="${c_name} │ ${c_src} │ ${c_cmd} │ ${when}  (${size})"
 	else
-		line="$(printf '%-*s │ %-*s │ %-*s │ %s' \
-			"${P_NAME_W}" "${P_NAME[${i}]}" "${P_SRC_W}" "${P_SRC[${i}]}" \
-			"${P_CMD_W}" "${cmd}" "aucune archive")"
+		c_name="$(_pad "${P_NAME[${i}]}" "${P_NAME_W}")"
+		c_src="$(_pad "${P_SRC[${i}]}" "${P_SRC_W}")"
+		c_cmd="$(_pad "${cmd}" "${P_CMD_W}")"
+		line="${c_name} │ ${c_src} │ ${c_cmd} │ aucune archive"
 	fi
 	printf '%s' "${line}"
 }
@@ -413,6 +416,16 @@ _load_timers() {
 	return 0
 }
 
+# Remplit à la largeur demandée en comptant les caractères (pas les octets) :
+# bash printf compterait « É » pour 2 et décalerait les colonnes accentuées.
+_pad() {
+	local s="${1:-}" w="${2:-0}" n=0
+	local LC_ALL=C.UTF-8
+	n=$((w - ${#s}))
+	((n < 0)) && n=0
+	printf '%s%*s' "${s}" "${n}" ''
+}
+
 _dash() {
 	local n="${1:-0}" i="" out=""
 	for ((i = 0; i < n; i++)); do
@@ -422,12 +435,14 @@ _dash() {
 }
 
 _timer_header() {
-	printf '%-*s │ %-*s │ %-*s │ %-*s │ %s' \
-		"${T_NAME_W}" "PROFIL" \
-		"${T_FREQ_W}" "FRÉQUENCE" \
-		"${T_NEXT_W}" "PROCHAINE EXÉCUTION" \
-		"${T_EXT_W}" "EXTINCTION" \
-		"DERNIER RÉSULTAT"
+	_pad "PROFIL" "${T_NAME_W}"
+	printf ' │ '
+	_pad "FRÉQUENCE" "${T_FREQ_W}"
+	printf ' │ '
+	_pad "PROCHAINE EXÉCUTION" "${T_NEXT_W}"
+	printf ' │ '
+	_pad "EXTINCTION" "${T_EXT_W}"
+	printf ' │ %s' "DERNIER RÉSULTAT"
 }
 
 _timer_rule() {
@@ -444,12 +459,14 @@ _timer_label() {
 	local i="${1}" ext=""
 	ext="${T_EXT[${i}]:-non}"
 	[[ ${ext} == "oui" ]] || ext="non"
-	printf '%-*s │ %-*s │ %-*s │ %-*s │ %s' \
-		"${T_NAME_W}" "${T_NAME[${i}]}" \
-		"${T_FREQ_W}" "${T_FREQ[${i}]} ${T_WHEN[${i}]}" \
-		"${T_NEXT_W}" "${T_NEXT[${i}]}" \
-		"${T_EXT_W}" "${ext}" \
-		"${T_RESULT[${i}]}"
+	_pad "${T_NAME[${i}]}" "${T_NAME_W}"
+	printf ' │ '
+	_pad "${T_FREQ[${i}]} ${T_WHEN[${i}]}" "${T_FREQ_W}"
+	printf ' │ '
+	_pad "${T_NEXT[${i}]}" "${T_NEXT_W}"
+	printf ' │ '
+	_pad "${ext}" "${T_EXT_W}"
+	printf ' │ %s' "${T_RESULT[${i}]}"
 }
 
 _timer_pick() {

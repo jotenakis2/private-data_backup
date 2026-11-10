@@ -363,6 +363,16 @@ _need() {
 	return "${missing}"
 }
 
+# Remplit à la largeur demandée en caractères (bash printf compterait les
+# octets et décalerait les en-têtes accentués).
+_pad() {
+	local s="${1:-}" w="${2:-0}" n=0
+	local LC_ALL=C.UTF-8
+	n=$((w - ${#s}))
+	((n < 0)) && n=0
+	printf '%s%*s' "${s}" "${n}" ''
+}
+
 _dashes() {
 	printf '%*s' "${1:-1}" '' | tr ' ' '-'
 }
@@ -1330,8 +1340,14 @@ show() {
 
 	printf '\n%bProfils%b %b(config : %s)%b\n' \
 		"${C_BOLD}" "${C_RESET}" "${C_DIM}" "${CFG_FILE:-valeurs par défaut}" "${C_RESET}"
-	printf '%-*s  %-*s  %-*s  %-*s  %s\n' \
-		"${w_prof}" "Profil" "${w_src}" "Dossier" "${w_cmd}" "Contrôle" "${w_arch}" "Dernière archive" "Taille"
+	_pad "Profil" "${w_prof}"
+	printf '  '
+	_pad "Dossier" "${w_src}"
+	printf '  '
+	_pad "Contrôle" "${w_cmd}"
+	printf '  '
+	_pad "Dernière archive" "${w_arch}"
+	printf '  %s\n' "Taille"
 	printf '%s  %s  %s  %s  %s\n' "${d_prof}" "${d_src}" "${d_cmd}" "${d_arch}" "${d_size}"
 
 	local when size_h
@@ -1339,17 +1355,21 @@ show() {
 		if _latest_archive "${profil}"; then
 			when="${LATEST_PATH##*/}"
 			size_h="$(_human_size "${LATEST_SIZE}")"
-			printf '%-*s  %-*s  %-*s  %-*s  %s\n' \
-				"${w_prof}" "${profil}" \
-				"${w_src}" "${SOURCES[${profil}]}" \
-				"${w_cmd}" "${COMMANDS[${profil}]:-}" \
-				"${w_arch}" "${when}" "${size_h}"
+			_pad "${profil}" "${w_prof}"
+			printf '  '
+			_pad "${SOURCES[${profil}]}" "${w_src}"
+			printf '  '
+			_pad "${COMMANDS[${profil}]:-}" "${w_cmd}"
+			printf '  '
+			_pad "${when}" "${w_arch}"
+			printf '  %s\n' "${size_h}"
 		else
-			printf '%-*s  %-*s  %-*s  %b(aucune)%b\n' \
-				"${w_prof}" "${profil}" \
-				"${w_src}" "${SOURCES[${profil}]}" \
-				"${w_cmd}" "${COMMANDS[${profil}]:-}" \
-				"${C_RED}" "${C_RESET}"
+			_pad "${profil}" "${w_prof}"
+			printf '  '
+			_pad "${SOURCES[${profil}]}" "${w_src}"
+			printf '  '
+			_pad "${COMMANDS[${profil}]:-}" "${w_cmd}"
+			printf '  %b(aucune)%b\n' "${C_RED}" "${C_RESET}"
 		fi
 	done
 
@@ -1360,11 +1380,13 @@ show() {
 		fi
 		when="${LATEST_PATH##*/}"
 		size_h="$(_human_size "${LATEST_SIZE}")"
-		printf '%-*s  %b%s%b%s  %-*s  %-*s  %s\n' \
-			"${w_prof}" "${profil}" \
-			"${C_YELLOW}" "${hors_cfg}" "${C_RESET}" "${hors_pad}" \
-			"${w_cmd}" "" \
-			"${w_arch}" "${when}" "${size_h}"
+		_pad "${profil}" "${w_prof}"
+		printf '  %b%s%b%s  ' \
+			"${C_YELLOW}" "${hors_cfg}" "${C_RESET}" "${hors_pad}"
+		_pad "" "${w_cmd}"
+		printf '  '
+		_pad "${when}" "${w_arch}"
+		printf '  %s\n' "${size_h}"
 	done
 
 	for i in "${!ARCH_GROUP[@]}"; do
@@ -3119,15 +3141,29 @@ timer_list() {
 		n=$((n + 1))
 	done
 
-	printf '\n%b%-*s %-*s %-*s %-9s %-*s %s%b\n' "${C_BOLD}" \
-		"${w_name}" "PROFIL" "${w_freq}" "FRÉQUENCE" "${w_next}" "PROCHAINE EXÉCUTION" \
-		"ÉTAT" "${w_ext}" "EXTINCTION" "DERNIER RÉSULTAT" "${C_RESET}"
+	printf '\n%b' "${C_BOLD}"
+	_pad "PROFIL" "${w_name}"
+	printf ' '
+	_pad "FRÉQUENCE" "${w_freq}"
+	printf ' '
+	_pad "PROCHAINE EXÉCUTION" "${w_next}"
+	printf ' '
+	_pad "ÉTAT" 9
+	printf ' '
+	_pad "EXTINCTION" "${w_ext}"
+	printf ' %s%b\n' "DERNIER RÉSULTAT" "${C_RESET}"
 	local idx=0
 	for idx in "${!col_name[@]}"; do
-		printf '%-*s %-*s %-*s %-9s %-*s %s\n' \
-			"${w_name}" "${col_name[${idx}]}" "${w_freq}" "${col_freq[${idx}]}" \
-			"${w_next}" "${col_next[${idx}]}" "${col_state[${idx}]}" \
-			"${w_ext}" "${col_ext[${idx}]}" "${col_res[${idx}]}"
+		_pad "${col_name[${idx}]}" "${w_name}"
+		printf ' '
+		_pad "${col_freq[${idx}]}" "${w_freq}"
+		printf ' '
+		_pad "${col_next[${idx}]}" "${w_next}"
+		printf ' '
+		_pad "${col_state[${idx}]}" 9
+		printf ' '
+		_pad "${col_ext[${idx}]}" "${w_ext}"
+		printf ' %s\n' "${col_res[${idx}]}"
 	done
 
 	local linger=""
