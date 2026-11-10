@@ -3769,7 +3769,7 @@ delete_old() {
 	done
 
 	local -a del_paths=() del_reasons=()
-	local rc=0 kept_total=0
+	local rc=0 kept_total=0 orphan_count=0
 	local profil is_snapshot label
 
 	if ((VERIFY == 1)); then
@@ -3794,6 +3794,7 @@ delete_old() {
 					del_paths+=("${paths[${i}]}")
 					del_reasons+=("orphelin")
 				done
+				orphan_count=$((orphan_count + ${#paths[@]}))
 				continue
 			fi
 			if ((ORPHANS == 0)); then
@@ -3855,6 +3856,9 @@ delete_old() {
 	done
 
 	if ((${#del_paths[@]} == 0)); then
+		if ((PURGE_ORPHANS == 1)) && ((orphan_count == 0)); then
+			_INFO "aucun profil orphelin à purger"
+		fi
 		local ck=""
 		ck="$(_count "${kept_total}" conservée conservées)"
 		_INFO "rien à supprimer (rétention : ${KEEP} par groupe, ${ck})"

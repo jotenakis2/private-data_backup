@@ -170,6 +170,15 @@ _fmt_dt() {
 	printf '%s-%s-%s %s:%s' "${d:0:4}" "${d:4:2}" "${d:6:2}" "${d:8:2}" "${d:10:2}"
 }
 
+_notice() {
+	local titre="${1:-Information}" texte="${2:-}"
+	printf '\n'
+	gum style --border rounded --padding "0 2" --foreground 3 \
+		"${ICON_INFO}  ${titre}" "" "${texte}"
+	_pause
+	return 0
+}
+
 _pause() {
 	printf '\n'
 	read -r -s -n 1 -p "  Entrée pour revenir au menu" || true
@@ -374,14 +383,20 @@ _pick_archive() {
 		labels+=("$(_archive_label "${i}")")
 	done
 	pick="$(gum choose --header "${ICON_ARCHIVE}  Choisir une archive" --cursor "❯ " \
-		--height 15 "${labels[@]}")" || return 1
+		--height 15 "${labels[@]}")" || {
+		_notice "Sélection annulée" "Aucune archive choisie."
+		return 1
+	}
 	for i in "${!labels[@]}"; do
 		if [[ ${labels[${i}]} == "${pick}" ]]; then
 			pos="${i}"
 			break
 		fi
 	done
-	((pos < 0)) && return 1
+	((pos < 0)) && {
+		_notice "Sélection invalide" "Aucune archive choisie."
+		return 1
+	}
 	PICK_FILE="${A_PATH[${pos}]}"
 	PICK_GROUP="${A_GROUP[${pos}]}"
 	return 0
@@ -485,14 +500,20 @@ _timer_pick() {
 	for i in "${!T_NAME[@]}"; do
 		labels+=("$(_timer_label "${i}")")
 	done
-	pick="$(gum choose --header "${ICON_CLOCK}  Choisir — PROFIL · FRÉQUENCE · PROCHAINE · EXTINCTION · RÉSULTAT" --cursor "❯ " "${labels[@]}")" || return 1
+	pick="$(gum choose --header "${ICON_CLOCK}  Choisir — PROFIL · FRÉQUENCE · PROCHAINE · EXTINCTION · RÉSULTAT" --cursor "❯ " "${labels[@]}")" || {
+		_notice "Sélection annulée" "Aucune planification choisie."
+		return 1
+	}
 	for i in "${!labels[@]}"; do
 		if [[ ${labels[${i}]} == "${pick}" ]]; then
 			pos="${i}"
 			break
 		fi
 	done
-	((pos < 0)) && return 1
+	((pos < 0)) && {
+		_notice "Sélection invalide" "Aucun profil choisi."
+		return 1
+	}
 	printf '%s' "${pos}"
 	return 0
 }
@@ -553,14 +574,23 @@ _timer_edit() {
 
 	printf '\n%s %s\n' "${ICON_CLOCK}" "${name}"
 	if [[ ${freq} == "hebdomadaire" ]]; then
-		choice="$(gum choose --header "Fréquence ${existing}" "Hebdomadaire" "Quotidien")" || return 0
+		choice="$(gum choose --header "Fréquence ${existing}" "Hebdomadaire" "Quotidien")" || {
+			_notice "Planification annulée" "Aucune modification enregistrée."
+			return 0
+		}
 	else
-		choice="$(gum choose --header "Fréquence ${existing}" "Quotidien" "Hebdomadaire")" || return 0
+		choice="$(gum choose --header "Fréquence ${existing}" "Quotidien" "Hebdomadaire")" || {
+			_notice "Planification annulée" "Aucune modification enregistrée."
+			return 0
+		}
 	fi
 	case "${choice}" in
 	Quotidien*) freq="quotidien" ;;
 	Hebdomadaire*) freq="hebdomadaire" ;;
-	*) return 0 ;;
+	*)
+		_notice "Planification annulée" "Aucune modification enregistrée."
+		return 0
+		;;
 	esac
 
 	if [[ ${freq} == "hebdomadaire" ]]; then
@@ -578,19 +608,34 @@ _timer_edit() {
 			[[ ${j,,} == "${day}" ]] && continue
 			ordre+=("${j}")
 		done
-		day="$(gum choose --header "Jour de la semaine" "${ordre[@]}")" || return 0
+		day="$(gum choose --header "Jour de la semaine" "${ordre[@]}")" || {
+			_notice "Planification annulée" "Aucune modification enregistrée."
+			return 0
+		}
 	fi
 
-	time="$(gum input --header "Heure (HH:MM)" --value "${time}" --placeholder "18:00")" || return 0
-	[[ -n ${time} ]] || return 0
+	time="$(gum input --header "Heure (HH:MM)" --value "${time}" --placeholder "18:00")" || {
+		_notice "Planification annulée" "Aucune modification enregistrée."
+		return 0
+	}
+	[[ -n ${time} ]] || {
+		_notice "Planification annulée" "Heure vide — aucune modification."
+		return 0
+	}
 
 	# Mode à l'extinction (propre à cette planification).
 	if ((ext == 1)); then
 		mode="$(gum choose --header "Si l'application est ouverte" \
-			"Tenter à l'extinction (actuel)" "Ignorer jusqu'à la prochaine échéance")" || return 0
+			"Tenter à l'extinction (actuel)" "Ignorer jusqu'à la prochaine échéance")" || {
+			_notice "Planification annulée" "Aucune modification enregistrée."
+			return 0
+		}
 	else
 		mode="$(gum choose --header "Si l'application est ouverte" \
-			"Ignorer jusqu'à la prochaine échéance (actuel)" "Tenter à l'extinction")" || return 0
+			"Ignorer jusqu'à la prochaine échéance (actuel)" "Tenter à l'extinction")" || {
+			_notice "Planification annulée" "Aucune modification enregistrée."
+			return 0
+		}
 	fi
 	case "${mode}" in
 	Tenter*) ext=1 ;;
@@ -603,7 +648,10 @@ _timer_edit() {
 	((ext == 1)) && summary="${summary} — à l'extinction si nécessaire"
 	gum style --border rounded --padding "0 2" "${ICON_CLOCK}  Planification" "" "${summary}"
 	gum confirm --default=false --affirmative "Enregistrer" --negative "Annuler" \
-		"Programmer cette sauvegarde automatique ?" || return 0
+		"Programmer cette sauvegarde automatique ?" || {
+		_notice "Planification annulée" "Aucune modification enregistrée."
+		return 0
+	}
 	printf '\n'
 	if [[ ${freq} == "hebdomadaire" ]]; then
 		if ((ext == 1)); then
@@ -635,6 +683,7 @@ _timer_remove() {
 	name="${T_NAME[${pos}]}"
 	if ! gum confirm --default=false --affirmative "Supprimer" --negative "Annuler" \
 		"Supprimer la sauvegarde automatique de ${name} ? (les archives restent)"; then
+		_notice "Suppression annulée" "La planification est conservée."
 		return 0
 	fi
 	printf '\n'
@@ -649,6 +698,7 @@ _timer_run() {
 	name="${T_NAME[${pos}]}"
 	if ! gum confirm --default=false --affirmative "Lancer" --negative "Annuler" \
 		"Lancer la sauvegarde de ${name} maintenant ?"; then
+		_notice "Lancement annulé" "Aucune sauvegarde lancée."
 		return 0
 	fi
 	printf '\n'
@@ -682,6 +732,7 @@ _timer_linger() {
 	printf '\n'
 	if ! gum confirm --default=false --affirmative "Autoriser" --negative "Annuler" \
 		"Autoriser les timers à tourner même session fermée (root) ?"; then
+		_notice "Linger inchangé" "Les timers restent limités à la session ouverte."
 		return 0
 	fi
 	printf '\n'
@@ -778,17 +829,29 @@ _screen_backup() {
 
 	pick="$(gum choose --no-limit --height 15 \
 		--header "${ICON_SAVE}  Sauvegarder — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" \
-		--cursor "❯ " "${labels[@]}")" || return 0
-	[[ -z ${pick} ]] && return 0
+		--cursor "❯ " "${labels[@]}")" || {
+		_notice "Sauvegarde annulée" "Aucun profil sélectionné."
+		return 0
+	}
+	[[ -z ${pick} ]] && {
+		_notice "Sauvegarde annulée" "Aucun profil sélectionné."
+		return 0
+	}
 
 	while IFS= read -r line; do
 		[[ -n ${line} ]] || continue
 		args+=("${line%% *}")
 	done <<<"${pick}"
-	((${#args[@]} == 0)) && return 0
+	((${#args[@]} == 0)) && {
+		_notice "Sauvegarde annulée" "Aucun profil sélectionné."
+		return 0
+	}
 
 	gum confirm --affirmative "Sauvegarder" --negative "Annuler" \
-		"Sauvegarder : ${args[*]} ?" || return 0
+		"Sauvegarder : ${args[*]} ?" || {
+		_notice "Sauvegarde annulée" "Aucune donnée archivée."
+		return 0
+	}
 
 	printf '\n'
 	"${CLI}" backup "${args[@]}"
@@ -814,14 +877,20 @@ _screen_restore() {
 	fi
 
 	pick="$(gum choose --header "${ICON_RESTORE}  Restaurer — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" \
-		--cursor "❯ " "${labels[@]}")" || return 0
+		--cursor "❯ " "${labels[@]}")" || {
+		_notice "Restauration annulée" "Aucun profil sélectionné."
+		return 0
+	}
 	for j in "${!labels[@]}"; do
 		if [[ ${labels[${j}]} == "${pick}" ]]; then
 			pos="${j}"
 			break
 		fi
 	done
-	((pos < 0)) && return 0
+	((pos < 0)) && {
+		_notice "Restauration annulée" "Aucun profil sélectionné."
+		return 0
+	}
 	i="${idx[${pos}]}"
 	profile="${P_NAME[${i}]}"
 	when="$(_fmt_dt "${P_DATE[${i}]}")"
@@ -839,7 +908,10 @@ _screen_restore() {
 		"sont conservés en *.pre-restore-<date>."
 
 	mode="$(gum choose --header "${ICON_SNAP}  Instantané de l'état actuel avant écrasement" \
-		"auto (si ≤ 512 Mo)" "oui (forcer)" "non (aucun)")" || return 0
+		"auto (si ≤ 512 Mo)" "oui (forcer)" "non (aucun)")" || {
+		_notice "Restauration annulée" "Aucun instantané choisi — rien n'a été restauré."
+		return 0
+	}
 
 	opts=(restore "${profile}" --yes)
 	case "${mode}" in
@@ -849,7 +921,10 @@ _screen_restore() {
 	esac
 
 	gum confirm --default=false --affirmative "Restaurer" --negative "Annuler" \
-		"Écraser ~/${P_SRC[${i}]} avec ${P_ARCH[${i}]} ?" || return 0
+		"Écraser ~/${P_SRC[${i}]} avec ${P_ARCH[${i}]} ?" || {
+		_notice "Restauration annulée" "Aucun fichier n'a été écrasé."
+		return 0
+	}
 
 	printf '\n'
 	"${CLI}" "${opts[@]}"
@@ -879,6 +954,7 @@ _archives_restore() {
 		"cible   : ~/${src}"
 	if ! gum confirm --default=false --affirmative "Restaurer" --negative "Annuler" \
 		"Écraser ~/${src} avec cette archive ?"; then
+		_notice "Restauration annulée" "Aucun fichier n'a été écrasé."
 		return 0
 	fi
 	printf '\n'
@@ -915,8 +991,14 @@ _pick_archives() {
 	done
 	pick="$(gum choose --no-limit --height 15 \
 		--header "${ICON_TRASH}  Supprimer — x pour cocher, entrée pour valider" \
-		--cursor "❯ " "${labels[@]}")" || return 1
-	[[ -z ${pick} ]] && return 1
+		--cursor "❯ " "${labels[@]}")" || {
+		_notice "Sélection annulée" "Aucune archive cochée."
+		return 1
+	}
+	[[ -z ${pick} ]] && {
+		_notice "Sélection vide" "Aucune archive cochée."
+		return 1
+	}
 	while IFS= read -r line; do
 		[[ -n ${line} ]] || continue
 		for i in "${!labels[@]}"; do
@@ -926,7 +1008,10 @@ _pick_archives() {
 			fi
 		done
 	done <<<"${pick}"
-	((${#PICK_FILES[@]} > 0)) || return 1
+	((${#PICK_FILES[@]} > 0)) || {
+		_notice "Sélection vide" "Aucune archive cochée."
+		return 1
+	}
 	return 0
 }
 
@@ -949,6 +1034,7 @@ _archives_delete() {
 	cp="$(_count "${np}" archive archives)"
 	if ! gum confirm --default=false --affirmative "Supprimer" --negative "Annuler" \
 		"Supprimer définitivement ${cp} ?"; then
+		_notice "Suppression annulée" "Aucune archive supprimée."
 		return 0
 	fi
 	printf '\n'
@@ -958,17 +1044,16 @@ _archives_delete() {
 }
 
 _archives_encrypt() {
-	local enc="" i clair=0
+	local enc="" i clair=0 out="" rc=0 tmp=""
 	enc="$(_config_get ENCRYPT)"
 	if [[ ${enc} != "age" ]]; then
-		gum style --border rounded --padding "0 2" --foreground 3 \
-			"${ICON_WARN}  Chiffrement inactif : active-le dans Configuration → Chiffrement."
-		_pause
+		_notice "Chiffrement inactif" \
+			"Active-le dans Configuration → Chiffrement (ENCRYPT=age)."
 		return 0
 	fi
 	if ! _load_archives; then
-		gum style --border rounded --padding "0 2" --foreground 1 "${ICON_WARN}  Liste indisponible (NAS monté ?)"
-		_pause
+		_notice "Chiffrement impossible" \
+			"Liste des archives indisponible : le NAS est-il monté ?"
 		return 0
 	fi
 	for i in "${!A_PATH[@]}"; do
@@ -979,25 +1064,40 @@ _archives_encrypt() {
 	done
 	if ((clair == 0)); then
 		if ((${#A_PATH[@]} == 0)); then
-			gum style --border rounded --padding "0 2" --foreground 3 \
-				"${ICON_EMPTY}  Aucune archive sur le stockage."
+			_notice "Chiffrement" "Aucune archive sur le stockage."
 		else
 			local na=${#A_PATH[@]}
 			if ((na == 1)); then
-				gum style --border rounded --padding "0 2" --foreground 2 \
-					"${ICON_CHECK}  L'archive est déjà chiffrée (1 archive)."
+				_notice "Chiffrement" "L'unique archive est déjà chiffrée."
 			else
-				gum style --border rounded --padding "0 2" --foreground 2 \
-					"${ICON_CHECK}  Toutes les archives sont déjà chiffrées (${na} archives)."
+				_notice "Chiffrement" "Toutes les archives sont déjà chiffrées (${na})."
 			fi
 		fi
-		_pause
 		return 0
 	fi
+
+	tmp="$(mktemp)" || {
+		_notice "Chiffrement impossible" "Fichier temporaire inaccessible."
+		return 0
+	}
 	printf '\n'
-	"${CLI}" encrypt-archives --dry-run
+	"${CLI}" encrypt-archives --dry-run 2>&1 | tee "${tmp}"
+	rc=${PIPESTATUS[0]}
+	out="$(cat "${tmp}")"
+	rm -f -- "${tmp}"
+	if ((rc != 0)); then
+		_notice "Chiffrement impossible" "La commande a échoué — rien n'a été modifié."
+		return 0
+	fi
+	if [[ ${out} == *"aucune archive en clair"* ]] ||
+		[[ ${out} == *"toutes les archives sont déjà chiffrées"* ]] ||
+		[[ ${out} == *"aucune archive sur le stockage"* ]]; then
+		_notice "Chiffrement" "Aucune archive en clair à chiffrer."
+		return 0
+	fi
 	if ! gum confirm --default=false --affirmative "Chiffrer" --negative "Annuler" \
 		"Chiffrer ces archives et supprimer les originaux en clair ?"; then
+		_notice "Chiffrement annulé" "Aucune archive modifiée."
 		return 0
 	fi
 	printf '\n'
@@ -1008,18 +1108,26 @@ _archives_encrypt() {
 
 _archives_retention() {
 	local out="" rc=0 tmp=""
-	tmp="$(mktemp)" || return 0
+	tmp="$(mktemp)" || {
+		_notice "Rétention impossible" "Fichier temporaire inaccessible."
+		return 0
+	}
 	printf '\n'
 	"${CLI}" delete_old --dry-run 2>&1 | tee "${tmp}"
 	rc=${PIPESTATUS[0]}
 	out="$(cat "${tmp}")"
 	rm -f -- "${tmp}"
-	if ((rc != 0)) || [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
-		_pause
+	if ((rc != 0)); then
+		_notice "Rétention impossible" "La commande a échoué — rien n'a été supprimé."
+		return 0
+	fi
+	if [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
+		_notice "Rétention" "Aucune archive à supprimer."
 		return 0
 	fi
 	if ! gum confirm --default=false --affirmative "Appliquer" --negative "Annuler" \
 		"Appliquer cette rétention (suppressions définitives) ?"; then
+		_notice "Rétention annulée" "Aucune archive supprimée."
 		return 0
 	fi
 	printf '\n'
@@ -1030,18 +1138,30 @@ _archives_retention() {
 
 _archives_purge() {
 	local out="" rc=0 tmp=""
-	tmp="$(mktemp)" || return 0
+	tmp="$(mktemp)" || {
+		_notice "Purge impossible" "Fichier temporaire inaccessible."
+		return 0
+	}
 	printf '\n'
 	"${CLI}" delete_old --purge-orphans --dry-run --no-verify 2>&1 | tee "${tmp}"
 	rc=${PIPESTATUS[0]}
 	out="$(cat "${tmp}")"
 	rm -f -- "${tmp}"
-	if ((rc != 0)) || [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
-		_pause
+	if ((rc != 0)); then
+		_notice "Purge impossible" "La commande a échoué — rien n'a été supprimé."
+		return 0
+	fi
+	if [[ ${out} == *"aucun profil orphelin"* ]]; then
+		_notice "Purge" "Aucun profil orphelin à purger."
+		return 0
+	fi
+	if [[ ${out} == *"rien à supprimer"* ]] || [[ ${out} == *"aucune archive"* ]]; then
+		_notice "Purge" "Aucune archive à purger."
 		return 0
 	fi
 	if ! gum confirm --default=false --affirmative "Purger" --negative "Annuler" \
-		"Supprimer tous les profils hors configuration (définitif) ?"; then
+		"Appliquer la purge des orphelins et la rétention (définitif) ?"; then
+		_notice "Purge annulée" "Aucune archive supprimée."
 		return 0
 	fi
 	printf '\n'
@@ -1110,14 +1230,20 @@ _profile_pick() {
 	for i in "${!P_NAME[@]}"; do
 		labels+=("$(_label "${i}")")
 	done
-	pick="$(gum choose --header "${ICON_USERS}  Choisir — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" --cursor "❯ " "${labels[@]}")" || return 1
+	pick="$(gum choose --header "${ICON_USERS}  Choisir — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" --cursor "❯ " "${labels[@]}")" || {
+		_notice "Sélection annulée" "Aucun profil choisi."
+		return 1
+	}
 	for i in "${!labels[@]}"; do
 		if [[ ${labels[${i}]} == "${pick}" ]]; then
 			pos="${i}"
 			break
 		fi
 	done
-	((pos < 0)) && return 1
+	((pos < 0)) && {
+		_notice "Sélection invalide" "Aucun profil choisi."
+		return 1
+	}
 	printf '%s' "${pos}"
 	return 0
 }
@@ -1172,7 +1298,10 @@ _profile_save() {
 		"binaire : ${PF_CMD:-(aucun)}" \
 		"exclure : ${PF_EXCL:-(aucune)}"
 	gum confirm --default=false --affirmative "Enregistrer" --negative "Annuler" \
-		"Écrire dans le fichier de configuration ?" || return 0
+		"Écrire dans le fichier de configuration ?" || {
+		_notice "Profil non enregistré" "Configuration inchangée."
+		return 0
+	}
 	printf '\n'
 	"${CLI}" profile-add "${PF_NAME}" "${PF_SRC}" "${PF_CMD}" "${PF_EXCL}"
 	rc=$?
@@ -1181,7 +1310,10 @@ _profile_save() {
 }
 
 _profile_add() {
-	_profile_inputs add || return 0
+	_profile_inputs add || {
+		_notice "Profil non ajouté" "Saisie annulée — configuration inchangée."
+		return 0
+	}
 	_profile_save "Ajouter"
 	return 0
 }
@@ -1190,7 +1322,10 @@ _profile_edit() {
 	local pos="" old="" rc=0
 	pos="$(_profile_pick)" || return 0
 	old="${P_NAME[${pos}]}"
-	_profile_inputs edit "${pos}" || return 0
+	_profile_inputs edit "${pos}" || {
+		_notice "Profil non modifié" "Saisie annulée — configuration inchangée."
+		return 0
+	}
 	_profile_save "Modifier"
 	rc=$?
 	# Renommage : l'ancien nom est retiré seulement si l'écriture a réussi.
@@ -1216,6 +1351,7 @@ _profile_adopt() {
 	if ! gum confirm --default=false --affirmative "Adopter" --negative "Annuler" \
 		"Ajouter ces profils orphelins à la configuration ?"; then
 		rm -f -- "${tmp}"
+		_notice "Adoption annulée" "Configuration inchangée."
 		return 0
 	fi
 	printf '\n'
@@ -1237,6 +1373,7 @@ _profile_remove() {
 	pos="$(_profile_pick)" || return 0
 	if ! gum confirm --default=false --affirmative "Retirer" --negative "Annuler" \
 		"Retirer ${P_NAME[${pos}]} de la configuration ? (ses archives resteront sur le NAS)"; then
+		_notice "Retrait annulé" "Le profil reste dans la configuration."
 		return 0
 	fi
 	printf '\n'
@@ -1381,7 +1518,10 @@ _config_apply() {
 	local -a pairs=("${@}")
 	gum style --border rounded --padding "0 2" "Nouvelle configuration" "" "${pairs[@]}"
 	gum confirm --default=false --affirmative "Enregistrer" --negative "Annuler" \
-		"Écrire ces paramètres dans la configuration ?" || return 0
+		"Écrire ces paramètres dans la configuration ?" || {
+		_notice "Configuration inchangée" "Aucun paramètre enregistré."
+		return 0
+	}
 	printf '\n'
 	"${CLI}" config-set "${pairs[@]}"
 	_pause
