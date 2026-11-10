@@ -3334,7 +3334,9 @@ timer_shutdown_enable() {
 		_INFO "annulé — service d'extinction non installé"
 		return 3
 	fi
-	[[ -w ${dir} ]] || need_root=1
+	if [[ ! -w ${dir} ]] || [[ ${PRIVATE_BACKUP_FORCE_ROOT:-0} == 1 ]]; then
+		need_root=1
+	fi
 	if ((need_root == 1)) && ! command -v pkexec >/dev/null 2>&1; then
 		_ERR "pkexec introuvable : installe ${path} en root puis « systemctl enable ${SYSTEM_UNIT_NAME} »"
 		return 1
@@ -3350,21 +3352,23 @@ timer_shutdown_enable() {
 	fi
 	chmod 644 -- "${tmp}" 2>/dev/null || true
 	if ((need_root == 1)); then
-		if ! out="$(pkexec install -m 0644 -o root -g root "${tmp}" "${path}" 2>&1)"; then
-			_ERR "installation du service refusée ou impossible"
+		# Une seule élévation : installation + daemon-reload + enable.
+		local inst="" sc=""
+		inst="$(command -v install)" || inst="/usr/bin/install"
+		sc="$(command -v "${SYSTEMCTL_BIN}")" || sc="/usr/bin/systemctl"
+		# shellcheck disable=SC2016 # $1… sont lus par le bash lancé via pkexec
+		if ! out="$(pkexec /bin/bash -c '
+			set -u
+			"$1" -m 0644 "$2" "$3" || exit 1
+			"$4" daemon-reload || exit 1
+			"$4" enable "$5" || exit 1
+		' _ "${inst}" "${tmp}" "${path}" "${sc}" "${SYSTEM_UNIT_NAME}" 2>&1)"; then
+			_ERR "installation/activation du service refusée ou impossible"
 			[[ -n ${out} ]] && printf '%s\n' "${out}" >&2
 			rm -f -- "${tmp}"
 			return 1
 		fi
 		rm -f -- "${tmp}"
-		if ! pkexec "${SYSTEMCTL_BIN}" daemon-reload 2>/dev/null; then
-			_WARN "daemon-reload a échoué"
-			rc=1
-		fi
-		if ! pkexec "${SYSTEMCTL_BIN}" enable "${SYSTEM_UNIT_NAME}" 2>&1; then
-			_ERR "activation du service d'extinction impossible"
-			return 1
-		fi
 	else
 		if ! install -m 0644 -- "${tmp}" "${path}" 2>/dev/null; then
 			_ERR "écriture impossible : ${path}"
@@ -3389,7 +3393,7 @@ timer_shutdown_enable() {
 }
 
 timer_shutdown_disable() {
-	local path="" spath="" dir="" need_root=0 rc=0
+	local path="" spath="" dir="" need_root=0 rc=0 out="" sc=""
 	path="$(_shutdown_unit_path)"
 	spath="$(_session_unit_path)"
 	dir="${path%/*}"
@@ -3415,18 +3419,27 @@ timer_shutdown_disable() {
 		_OK "service d'extinction retiré"
 		return "${rc}"
 	fi
-	[[ -w ${dir} ]] || need_root=1
+	if [[ ! -w ${dir} ]] || [[ ${PRIVATE_BACKUP_FORCE_ROOT:-0} == 1 ]]; then
+		need_root=1
+	fi
 	if ((need_root == 1)); then
 		if ! command -v pkexec >/dev/null 2>&1; then
 			_ERR "pkexec introuvable : retire ${path} en root puis « systemctl disable ${SYSTEM_UNIT_NAME} »"
 			return 1
 		fi
-		pkexec "${SYSTEMCTL_BIN}" disable "${SYSTEM_UNIT_NAME}" 2>/dev/null || _WARN "désactivation incomplète"
-		if ! pkexec rm -f -- "${path}" 2>&1; then
-			_ERR "suppression impossible : ${path}"
+		# Une seule élévation : disable + suppression + daemon-reload.
+		sc="$(command -v "${SYSTEMCTL_BIN}")" || sc="/usr/bin/systemctl"
+		# shellcheck disable=SC2016 # $1… sont lus par le bash lancé via pkexec
+		if ! out="$(pkexec /bin/bash -c '
+			set -u
+			"$1" disable "$2" 2>/dev/null || true
+			rm -f -- "$3" || exit 1
+			"$1" daemon-reload || exit 1
+		' _ "${sc}" "${SYSTEM_UNIT_NAME}" "${path}" 2>&1)"; then
+			_ERR "retrait du service refusé ou impossible"
+			[[ -n ${out} ]] && printf '%s\n' "${out}" >&2
 			return 1
 		fi
-		pkexec "${SYSTEMCTL_BIN}" daemon-reload 2>/dev/null || rc=1
 	else
 		"${SYSTEMCTL_BIN}" disable "${SYSTEM_UNIT_NAME}" 2>/dev/null || _WARN "désactivation incomplète"
 		if ! rm -f -- "${path}"; then
