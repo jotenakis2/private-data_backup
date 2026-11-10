@@ -3084,7 +3084,7 @@ timer_list() {
 	fi
 
 	local -a col_name=() col_freq=() col_next=() col_state=() col_res=() col_ext=()
-	local w_name=6 w_freq=10 w_next=8 w_ext=4
+	local w_name=6 w_freq=10 w_next=19 w_ext=10
 	for file in "${noms[@]}"; do
 		name="${file##*/}"
 		name="${name#"${SCRIPTNAME}"@}"
@@ -3098,7 +3098,7 @@ timer_list() {
 		st="$(_timer_state "${unit}")"
 		next="$(_timer_next "${unit}")"
 		res="$(_timer_result "${svc}")"
-		ext_h="-"
+		ext_h="non"
 		[[ ${ext} == 1 ]] && ext_h="oui"
 		col_name+=("${name}")
 		col_freq+=("${freq} ${when}")
@@ -3114,8 +3114,8 @@ timer_list() {
 	done
 
 	printf '\n%b%-*s %-*s %-*s %-9s %-*s %s%b\n' "${C_BOLD}" \
-		"${w_name}" "PROFIL" "${w_freq}" "FRÉQUENCE" "${w_next}" "PROCHAIN" \
-		"ÉTAT" "${w_ext}" "EXT." "DERNIER" "${C_RESET}"
+		"${w_name}" "PROFIL" "${w_freq}" "FRÉQUENCE" "${w_next}" "PROCHAINE EXÉCUTION" \
+		"ÉTAT" "${w_ext}" "EXTINCTION" "DERNIER RÉSULTAT" "${C_RESET}"
 	local idx=0
 	for idx in "${!col_name[@]}"; do
 		printf '%-*s %-*s %-*s %-9s %-*s %s\n' \

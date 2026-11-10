@@ -59,8 +59,8 @@ declare -a A_GROUP=() A_DATE=() A_SIZE=() A_PATH=()
 declare -a T_NAME=() T_FREQ=() T_WHEN=() T_NEXT=() T_STATE=() T_RESULT=() T_EXT=()
 T_NAME_W=6
 T_FREQ_W=12
-T_NEXT_W=20
-T_EXT_W=3
+T_NEXT_W=19
+T_EXT_W=10
 
 # Sélections courantes.
 PICK_FILE=""
@@ -303,6 +303,14 @@ _error_text() {
 # LIBELLÉS
 # =============================================================================
 
+_profile_header() {
+	printf '%-*s %-*s %-*s %s' \
+		"${P_NAME_W}" "PROFIL" \
+		"${P_SRC_W}" "DOSSIER" \
+		"${P_CMD_W}" "BINAIRE" \
+		"DERNIÈRE ARCHIVE"
+}
+
 _label() {
 	local i="${1}" line="" when="" size="" cmd=""
 	# Colonne « binaire surveillé » : le nom du processus, ou un tiret.
@@ -371,8 +379,8 @@ _load_timers() {
 	T_NAME=(); T_FREQ=(); T_WHEN=(); T_NEXT=(); T_STATE=(); T_RESULT=(); T_EXT=()
 	T_NAME_W=6
 	T_FREQ_W=12
-	T_NEXT_W=20
-	T_EXT_W=3
+	T_NEXT_W=19
+	T_EXT_W=10
 	if ! out="$("${CLI}" timer-list --porcelain 2>/dev/null)"; then
 		return 1
 	fi
@@ -396,10 +404,19 @@ _load_timers() {
 	return 0
 }
 
+_timer_header() {
+	printf '%-*s %-*s %-*s %-*s %s' \
+		"${T_NAME_W}" "PROFIL" \
+		"${T_FREQ_W}" "FRÉQUENCE" \
+		"${T_NEXT_W}" "PROCHAINE EXÉCUTION" \
+		"${T_EXT_W}" "EXTINCTION" \
+		"DERNIER RÉSULTAT"
+}
+
 _timer_label() {
 	local i="${1}" ext=""
-	ext="${T_EXT[${i}]:--}"
-	[[ ${ext} == "oui" ]] || ext="-"
+	ext="${T_EXT[${i}]:-non}"
+	[[ ${ext} == "oui" ]] || ext="non"
 	printf '%-*s %-*s %-*s %-*s %s' \
 		"${T_NAME_W}" "${T_NAME[${i}]}" \
 		"${T_FREQ_W}" "${T_FREQ[${i}]} ${T_WHEN[${i}]}" \
@@ -419,7 +436,7 @@ _timer_pick() {
 	for i in "${!T_NAME[@]}"; do
 		labels+=("$(_timer_label "${i}")")
 	done
-	pick="$(gum choose --header "${ICON_CLOCK}  Choisir une planification" --cursor "❯ " "${labels[@]}")" || return 1
+	pick="$(gum choose --header "${ICON_CLOCK}  Choisir — PROFIL · FRÉQUENCE · PROCHAINE · EXTINCTION · RÉSULTAT" --cursor "❯ " "${labels[@]}")" || return 1
 	for i in "${!labels[@]}"; do
 		if [[ ${labels[${i}]} == "${pick}" ]]; then
 			pos="${i}"
@@ -625,7 +642,7 @@ _timer_linger() {
 }
 
 _screen_timers() {
-	local action="" count=0 linger="" cc="" i=""
+	local action="" count=0 linger="" cc="" i="" header=""
 	local -a labels=()
 	while true; do
 		_clear
@@ -639,8 +656,9 @@ _screen_timers() {
 			for i in "${!T_NAME[@]}"; do
 				labels+=("$(_timer_label "${i}")")
 			done
+			header="$(_timer_header)"
 			gum style --border rounded --padding "0 2" \
-				"Sauvegardes automatiques (${cc})" "" "${labels[@]}"
+				"Sauvegardes automatiques (${cc})" "" "${header}" "${labels[@]}"
 		else
 			gum style --border rounded --padding "0 2" --foreground 3 \
 				"${ICON_EMPTY}  Aucune sauvegarde automatique."
@@ -709,7 +727,7 @@ _screen_backup() {
 	fi
 
 	pick="$(gum choose --no-limit --height 15 \
-		--header "${ICON_SAVE}  Sauvegarder — x pour cocher, entrée pour valider" \
+		--header "${ICON_SAVE}  Sauvegarder — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" \
 		--cursor "❯ " "${labels[@]}")" || return 0
 	[[ -z ${pick} ]] && return 0
 
@@ -745,7 +763,7 @@ _screen_restore() {
 		return 0
 	fi
 
-	pick="$(gum choose --header "${ICON_RESTORE}  Restaurer — choisir un profil" \
+	pick="$(gum choose --header "${ICON_RESTORE}  Restaurer — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" \
 		--cursor "❯ " "${labels[@]}")" || return 0
 	for j in "${!labels[@]}"; do
 		if [[ ${labels[${j}]} == "${pick}" ]]; then
@@ -1042,7 +1060,7 @@ _profile_pick() {
 	for i in "${!P_NAME[@]}"; do
 		labels+=("$(_label "${i}")")
 	done
-	pick="$(gum choose --header "${ICON_USERS}  Choisir un profil" --cursor "❯ " "${labels[@]}")" || return 1
+	pick="$(gum choose --header "${ICON_USERS}  Choisir — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" --cursor "❯ " "${labels[@]}")" || return 1
 	for i in "${!labels[@]}"; do
 		if [[ ${labels[${i}]} == "${pick}" ]]; then
 			pos="${i}"
@@ -1180,7 +1198,7 @@ _profile_remove() {
 _screen_profiles() {
 	_clear
 	local -a labels=()
-	local i action
+	local i action header=""
 
 	for i in "${!P_NAME[@]}"; do
 		labels+=("$(_label "${i}")")
@@ -1190,7 +1208,8 @@ _screen_profiles() {
 		_pause
 		return 0
 	fi
-	gum style --border rounded --padding "0 2" "Profils configurés" "" "${labels[@]}"
+	header="$(_profile_header)"
+	gum style --border rounded --padding "0 2" "Profils configurés" "" "${header}" "${labels[@]}"
 
 	action="$(gum choose --header "${ICON_USERS}  Profils — que faire ?" --cursor "❯ " \
 		"${ICON_PLUS}  Ajouter un profil" \

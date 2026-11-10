@@ -149,7 +149,8 @@ gestionnaire de session, et `TimeoutStartSec=infinity` court-circuite la limite
 de 5 s appliquée par Omarchy à l'arrêt de la session. Le service de session
 utilise `PartOf=graphical-session.target` et `TimeoutStopSec=infinity` ; si une
 extinction l'interrompt, le service système reprend l'attente restante.
-`timer-list` affiche une colonne `EXT.`, les profils en attente et l'état des
+`timer-list` affiche les colonnes `PROCHAINE EXÉCUTION`, `EXTINCTION`
+(`oui`/`non`) et `DERNIER RÉSULTAT`, les profils en attente et l'état des
 services. Sans le mode, le comportement reste inchangé (profil ignoré,
 prochaine échéance).
 
