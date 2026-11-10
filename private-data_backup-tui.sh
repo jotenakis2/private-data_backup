@@ -331,7 +331,7 @@ _profile_rule() {
 	a="$(_dash "${P_NAME_W}")"
 	b="$(_dash "${P_SRC_W}")"
 	c="$(_dash "${P_CMD_W}")"
-	d="$(_dash 15)"
+	d="$(_dash 16)"
 	printf '%s─┼─%s─┼─%s─┼─%s' "${a}" "${b}" "${c}" "${d}"
 }
 
@@ -471,7 +471,7 @@ _timer_rule() {
 	b="$(_dash "${T_FREQ_W}")"
 	c="$(_dash "${T_NEXT_W}")"
 	d="$(_dash "${T_EXT_W}")"
-	e="$(_dash 15)"
+	e="$(_dash 16)"
 	printf '%s─┼─%s─┼─%s─┼─%s─┼─%s' "${a}" "${b}" "${c}" "${d}" "${e}"
 }
 
@@ -519,8 +519,10 @@ _timer_pick() {
 }
 
 _pending_names() {
-	local dir="${XDG_STATE_HOME:-${HOME}/.local/state}/private_data_backup/pending"
-	local file="" out=""
+	local base="${XDG_STATE_HOME:-${HOME}/.local/state}"
+	local dir="" file="" out=""
+	[[ ${base} == /* ]] || base="${HOME}/.local/state"
+	dir="${base}/private_data_backup/pending"
 	[[ -d ${dir} ]] || return 0
 	for file in "${dir}"/*; do
 		[[ -f ${file} ]] || continue
@@ -530,9 +532,11 @@ _pending_names() {
 }
 
 _shutdown_installed() {
-	local sys="" ses=""
+	local sys="" ses="" base=""
 	sys="${PRIVATE_BACKUP_SYSTEM_UNIT_DIR:-/etc/systemd/system}/private-data_backup-shutdown.service"
-	ses="${PRIVATE_BACKUP_UNIT_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user}/private-data_backup-session.service"
+	base="${XDG_CONFIG_HOME:-${HOME}/.config}"
+	[[ ${base} == /* ]] || base="${HOME}/.config"
+	ses="${PRIVATE_BACKUP_UNIT_DIR:-${base}/systemd/user}/private-data_backup-session.service"
 	[[ -f ${sys} && -f ${ses} ]]
 }
 
@@ -543,7 +547,7 @@ _linger_state() {
 }
 
 _timer_edit() {
-	local pos="" name="" cur_pos=-1 freq="" time="" day="" existing="" summary="" choice="" ext=0 mode=""
+	local pos="" name="" cur_pos=-1 freq="" time="" day="" existing="" summary="" choice="" ext=0 mode="" trc=0
 	local i="" j=""
 	pos="$(_profile_pick)" || return 0
 	name="${P_NAME[${pos}]}"
@@ -659,14 +663,16 @@ _timer_edit() {
 		else
 			"${CLI}" timer-add "${name}" hebdomadaire "${day}" "${time}" --no-extinction
 		fi
+		trc=$?
 	else
 		if ((ext == 1)); then
 			"${CLI}" timer-add "${name}" quotidien "${time}" --extinction
 		else
 			"${CLI}" timer-add "${name}" quotidien "${time}" --no-extinction
 		fi
+		trc=$?
 	fi
-	if ((ext == 1)) && ! _shutdown_installed; then
+	if ((trc == 0)) && ((ext == 1)) && ! _shutdown_installed; then
 		if gum confirm --default=false --affirmative "Installer" --negative "Plus tard" \
 			"Installer le service d'extinction (root) maintenant ?"; then
 			printf '\n'
@@ -771,7 +777,7 @@ _screen_timers() {
 			gum style --foreground 3 "${ICON_WARN}  En attente d'extinction : ${attente}"
 		fi
 		if ! _shutdown_installed; then
-			if _load_timers && ((${#T_EXT[@]} > 0)); then
+			if ((${#T_EXT[@]} > 0)); then
 				local k="" besoin=0
 				for k in "${T_EXT[@]}"; do
 					[[ ${k} == "oui" ]] && besoin=1
@@ -1151,7 +1157,7 @@ _archives_purge() {
 		_notice "Purge impossible" "La commande a échoué — rien n'a été supprimé."
 		return 0
 	fi
-	if [[ ${out} == *"aucun profil orphelin"* ]]; then
+	if [[ ${out} == *"aucun profil orphelin à purger"* ]]; then
 		_notice "Purge" "Aucun profil orphelin à purger."
 		return 0
 	fi

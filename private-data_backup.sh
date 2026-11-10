@@ -123,7 +123,9 @@ PLAN_FILE=""
 APPLY_PLAN=""
 SYSTEMCTL_BIN="${PRIVATE_BACKUP_SYSTEMCTL:-systemctl}"
 # Sauvegardes reportées à l'extinction (par planification).
-PENDING_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/${SCRIPTNAME}/pending"
+STATE_BASE="${XDG_STATE_HOME:-${HOME}/.local/state}"
+[[ ${STATE_BASE} == /* ]] || STATE_BASE="${HOME}/.local/state"
+PENDING_DIR="${STATE_BASE}/${SCRIPTNAME}/pending"
 SYSTEM_UNIT_DIR="${PRIVATE_BACKUP_SYSTEM_UNIT_DIR:-/etc/systemd/system}"
 SYSTEM_UNIT_NAME="${SCRIPTNAME}-shutdown.service"
 SESSION_UNIT_NAME="${SCRIPTNAME}-session.service"
@@ -182,12 +184,22 @@ _log() {
 # Supprime les .part laissés par une exécution interrompue (SIGKILL à
 # l'extinction, coupure). Appelé avec le verrou tenu : aucun backup actif.
 _cleanup_stale_parts() {
-	local file="" rc=0
-	[[ -d ${NAS_MOUNT} ]] || return 0
-	for file in "${NAS_MOUNT}"/*.part; do
-		[[ -e ${file} ]] || continue
-		_WARN "reste d'archive interrompue supprimé : ${file##*/}"
-		rm -f -- "${file}" || rc=1
+	local file="" dir="" owner="" rc=0
+	for dir in "${NAS_MOUNT}" "${NAS_MOUNT}/${SNAPSHOT_SUBDIR}"; do
+		[[ -d ${dir} ]] || continue
+		for file in "${dir}"/*.part; do
+			[[ -e ${file} ]] || continue
+			# Uniquement nos archives, et uniquement celles de cet utilisateur :
+			# le verrou est par UID, un autre utilisateur peut sauvegarder.
+			case "${file##*/}" in
+			*.tar.gz.part | *.tar.gz.age.part) ;;
+			*) continue ;;
+			esac
+			owner="$(stat -c %u -- "${file}" 2>/dev/null)" || continue
+			[[ ${owner} == "${UID}" ]] || continue
+			_WARN "reste d'archive interrompue supprimé : ${file##*/}"
+			rm -f -- "${file}" || rc=1
+		done
 	done
 	return "${rc}"
 }
@@ -195,7 +207,15 @@ _cleanup_stale_parts() {
 # Prend le verrou exclusif (une seule instance qui écrit à la fois).
 _acquire_lock() {
 	_need flock || return 1
-	local lock_file="${XDG_RUNTIME_DIR:-/tmp}/${SCRIPTNAME}.${UID}.lock"
+	local lock_dir="" lock_file=""
+	lock_dir="${XDG_RUNTIME_DIR:-${HOME}/.local/state/${SCRIPTNAME}}"
+	[[ ${lock_dir} == /* ]] || lock_dir="${HOME}/.local/state/${SCRIPTNAME}"
+	if ! mkdir -p -- "${lock_dir}" 2>/dev/null; then
+		_ERR "dossier de verrou inaccessible : ${lock_dir}"
+		return 1
+	fi
+	chmod 700 -- "${lock_dir}" 2>/dev/null || true
+	lock_file="${lock_dir}/${SCRIPTNAME}.${UID}.lock"
 	if ! exec 9>"${lock_file}"; then
 		_ERR "impossible d'ouvrir le verrou ${lock_file}"
 		return 1
@@ -523,23 +543,28 @@ _config_validate() {
 	fi
 
 	for k in "${!SOURCES[@]}"; do
-		case "${SOURCES[${k}]}" in
-		"")
-			_ERR "SOURCES[${k}] est vide"
+		if ! _valid_profile_name "${k}"; then
+			_ERR "nom de profil invalide : ${k}"
 			errs=1
-			;;
-		/*)
-			_ERR "SOURCES[${k}] doit être relatif à \$HOME (reçu : ${SOURCES[${k}]})"
+		fi
+		if ! _source_path_ok "${SOURCES[${k}]}"; then
+			_ERR "SOURCES[${k}] doit être relatif à \$HOME, sans « .. » ni « . » (reçu : ${SOURCES[${k}]:-vide})"
 			errs=1
-			;;
-		*) ;;
-		esac
+		fi
 	done
 
 	for k in "${!COMMANDS[@]}"; do
+		if ! _valid_profile_name "${k}"; then
+			_ERR "nom de profil invalide dans COMMANDS : ${k}"
+			errs=1
+		fi
 		_known_profile "${k}" || _WARN "COMMANDS[${k}] : profil absent de SOURCES (ignoré)"
 	done
 	for k in "${!EXCLUDES[@]}"; do
+		if ! _valid_profile_name "${k}"; then
+			_ERR "nom de profil invalide dans EXCLUDES : ${k}"
+			errs=1
+		fi
 		_known_profile "${k}" || _WARN "EXCLUDES[${k}] : profil absent de SOURCES (ignoré)"
 	done
 
@@ -828,6 +853,10 @@ _check_nas() {
 	fi
 	if [[ ${NAS} != /* ]]; then
 		_ERR "NAS doit être un chemin absolu (reçu : ${NAS})"
+		return 1
+	fi
+	if ! _path_relative_ok "${BACKUP_SUBDIR}"; then
+		_ERR "BACKUP_SUBDIR invalide : ${BACKUP_SUBDIR} (relatif, sans « .. »)"
 		return 1
 	fi
 	NAS_MOUNT="${NAS%/}/${BACKUP_SUBDIR#/}"
@@ -1143,6 +1172,61 @@ _config_conflicts() {
 
 _known_profile() {
 	[[ -n "${SOURCES[${1}]:-}" ]]
+}
+
+_valid_profile_name() {
+	[[ ${1} =~ ^[A-Z][A-Z0-9_]*$ ]]
+}
+
+# Chemin relatif sûr : ni absolu, ni option, ni composant « .. ».
+_path_relative_ok() {
+	local p="${1}" case_p=""
+	[[ -n ${p} ]] || return 1
+	[[ ${p} != /* ]] || return 1
+	[[ ${p} != -* ]] || return 1
+	[[ ${p} != *$'\n'* ]] || return 1
+	[[ ${p} != *$'\r'* ]] || return 1
+	case_p="/${p}/"
+	[[ ${case_p} != *"/../"* ]] || return 1
+	return 0
+}
+
+# Dossier source d'un profil : relatif à $HOME, pas « . » (tout le home).
+_source_path_ok() {
+	local p="${1}"
+	_path_relative_ok "${p}" || return 1
+	[[ ${p} != "." ]] || return 1
+	return 0
+}
+
+# Contrôle de sécurité des chemins de la configuration.
+_config_paths_check() {
+	local k="" rc=0
+	for k in "${!SOURCES[@]}"; do
+		if ! _valid_profile_name "${k}"; then
+			_ERR "nom de profil invalide : ${k}"
+			rc=1
+		fi
+		if ! _source_path_ok "${SOURCES[${k}]}"; then
+			_ERR "SOURCES[${k}] : dossier invalide (${SOURCES[${k}]}) — relatif à \$HOME, sans « .. »"
+			rc=1
+		fi
+	done
+	for k in "${!COMMANDS[@]}" "${!EXCLUDES[@]}"; do
+		if ! _valid_profile_name "${k}"; then
+			_ERR "nom de profil invalide dans COMMANDS/EXCLUDES : ${k}"
+			rc=1
+		fi
+	done
+	if [[ -n ${NAS} && ${NAS} != /* ]]; then
+		_ERR "NAS invalide : ${NAS} — chemin absolu attendu"
+		rc=1
+	fi
+	if ! _path_relative_ok "${BACKUP_SUBDIR}"; then
+		_ERR "BACKUP_SUBDIR invalide : ${BACKUP_SUBDIR} — relatif, sans « .. »"
+		rc=1
+	fi
+	return "${rc}"
 }
 
 # Refuse tout chemin hors du stockage (sécurité avant suppression/vérification).
@@ -1560,7 +1644,15 @@ _backup_tar() {
 _backup_one() {
 	local profil="${1}" explicit="${2:-0}"
 	local src cmd abs target part enc size_h bytes
+	if ! _valid_profile_name "${profil}"; then
+		_ERR "nom de profil invalide : ${profil} — refuse par sécurité"
+		return 1
+	fi
 	src="${SOURCES[${profil}]}"
+	if ! _source_path_ok "${src}"; then
+		_ERR "${profil} : dossier source invalide (${src:-absent}) — refuse par sécurité"
+		return 1
+	fi
 	abs="${HOME}/${src}"
 
 	if ! [[ -e ${abs} ]]; then
@@ -1918,6 +2010,14 @@ _restore_file() {
 	local file="${1}" profil="${2}" with_snapshot="${3:-1}" label="${4:-Restauration}" verified="${5:-0}"
 	local suffix="" when="" size_h="" rc=0
 
+	if ! _valid_profile_name "${profil}"; then
+		_ERR "nom de profil invalide : ${profil} — restauration refusée"
+		return 1
+	fi
+	if ! _source_path_ok "${SOURCES[${profil}]:-}"; then
+		_ERR "${profil} : dossier source invalide — restauration refusée"
+		return 1
+	fi
 	[[ -f ${file} ]] || {
 		_ERR "archive absente : ${file}"
 		return 1
@@ -2331,6 +2431,11 @@ config_set() {
 	for pair in "${pairs[@]}"; do
 		key="${pair%%=*}"
 		val="${pair#*=}"
+		if [[ ${val} == *$'\n'* ]] || [[ ${val} == *$'\r'* ]]; then
+			rm -f -- "${tmp}"
+			_ERR "valeur multiligne refusée pour ${key}"
+			return 2
+		fi
 		if ! _config_write_scalar "${tmp}" "${key}" "${val}"; then
 			rm -f -- "${tmp}"
 			_ERR "écriture de ${key} impossible"
@@ -2373,8 +2478,8 @@ adopt_orphans() {
 		fi
 		while IFS=$'\t' read -r i src; do
 			[[ -n ${i} ]] || continue
-			if [[ -z ${src} ]] || [[ ${src} == /* ]]; then
-				_ERR "plan invalide : dossier manquant ou absolu pour ${i}"
+			if ! _source_path_ok "${src}"; then
+				_ERR "plan invalide : dossier manquant, absolu ou avec « .. » pour ${i}"
 				return 2
 			fi
 			if _known_profile "${i}"; then
@@ -2408,6 +2513,11 @@ adopt_orphans() {
 		group="${ARCH_GROUP[${i}]}"
 		[[ ${group} == "${SNAPSHOT_SUBDIR}/"* ]] && continue
 		_known_profile "${group}" && continue
+		if ! _valid_profile_name "${group}"; then
+			_WARN "${group} : nom de profil invalide — ignoré"
+			rc=1
+			continue
+		fi
 		[[ -n "${vu[${group}]:-}" ]] && continue
 		vu[${group}]=1
 		if ((${#filtres[@]} > 0)) && [[ -z "${filtre[${group}]:-}" ]]; then
@@ -2425,6 +2535,11 @@ adopt_orphans() {
 		fi
 		src="$(cat -- "${tmp}")"
 		rm -f -- "${tmp}"
+		if ! _source_path_ok "${src}"; then
+			_WARN "${group} : racine non adoptable (${src}) — ignoré"
+			rc=1
+			continue
+		fi
 		noms+=("${group}")
 		sources+=("${src}")
 	done
@@ -2501,6 +2616,7 @@ adopt_orphans() {
 
 _timer_unit_dir() {
 	local base="${XDG_CONFIG_HOME:-${HOME}/.config}"
+	[[ ${base} == /* ]] || base="${HOME}/.config"
 	printf '%s' "${PRIVATE_BACKUP_UNIT_DIR:-${base}/systemd/user}"
 }
 
@@ -2599,14 +2715,31 @@ _timer_put_stdin() {
 	return 0
 }
 
+# Guillemets sûrs pour une valeur d'unité systemd (ExecStart/Environment).
+_systemd_quote() {
+	local s="${1:-}"
+	[[ ${s} != *$'\n'* && ${s} != *$'\r'* ]] || return 1
+	s="${s//\\/\\\\}"
+	s="${s//\"/\\\"}"
+	s="${s//%/%%}"
+	printf '"%s"' "${s}"
+}
+
 # Template de service commun à tous les profils (%i = nom du profil).
 _timer_write_service() {
-	local cfg="${1}" dir="" path="" script="" cfgexec=""
+	local cfg="${1}" dir="" path="" script="" cfgexec="" cfgq=""
 	dir="$(_timer_unit_dir)"
 	path="${dir}/${SCRIPTNAME}@.service"
-	script="${SELF_PATH//%/%%}"
+	script="$(_systemd_quote "${SELF_PATH}")" || {
+		_ERR "chemin du script invalide pour l'unité (retour à la ligne)"
+		return 1
+	}
 	if [[ -n ${cfg} ]]; then
-		cfgexec="--config \"${cfg//%/%%}\" "
+		cfgq="$(_systemd_quote "${cfg}")" || {
+			_ERR "chemin de configuration invalide pour l'unité"
+			return 1
+		}
+		cfgexec="--config ${cfgq} "
 	fi
 	_timer_put "${path}" \
 		"[Unit]" \
@@ -2616,7 +2749,7 @@ _timer_write_service() {
 		"Type=oneshot" \
 		"Environment=PRIVATE_BACKUP_LOCK_WAIT=7200" \
 		"Environment=PRIVATE_BACKUP_STRICT_SKIP=1" \
-		"ExecStart=\"${script}\" ${cfgexec}backup %i" \
+		"ExecStart=${script} ${cfgexec}backup %i" \
 		"TimeoutStartSec=12h" \
 		"Nice=10" \
 		"IOSchedulingClass=idle"
@@ -2679,6 +2812,7 @@ _timer_meta() {
 
 _timer_extinction() {
 	local dir="" file=""
+	_valid_profile_name "${1}" || return 1
 	dir="$(_timer_unit_dir)"
 	file="${dir}/$(_timer_unit "${1}")"
 	[[ -f ${file} ]] && grep -q 'extinction=1' "${file}" 2>/dev/null
@@ -2710,10 +2844,16 @@ _session_unit_installed() {
 # vivant avec linger, mais graphical-session.target s'arrête.
 _session_unit_lines() {
 	local script="" cfg=""
-	script="${SELF_PATH//%/%%}"
+	script="$(_systemd_quote "${SELF_PATH}")" || {
+		_ERR "chemin du script invalide pour le service de session"
+		return 1
+	}
 	if [[ -n ${CFG_FILE} ]]; then
 		cfg="$(readlink -f -- "${CFG_FILE}" 2>/dev/null)" || cfg="${CFG_FILE}"
-		cfg="${cfg//%/%%}"
+		cfg="$(_systemd_quote "${cfg}")" || {
+			_ERR "chemin de configuration invalide pour le service de session"
+			return 1
+		}
 	fi
 	printf '%s\n' \
 		"[Unit]" \
@@ -2724,7 +2864,7 @@ _session_unit_lines() {
 		"Type=oneshot" \
 		"RemainAfterExit=yes" \
 		"ExecStart=/bin/true" \
-		"ExecStop=\"${script}\"${cfg:+ --config \"${cfg}\"} backup-pending --shutdown" \
+		"ExecStop=${script}${cfg:+ --config ${cfg}} backup-pending --shutdown" \
 		"Environment=PRIVATE_BACKUP_LOCK_WAIT=7200" \
 		"Environment=PRIVATE_BACKUP_STRICT_SKIP=1" \
 		"TimeoutStopSec=infinity" \
@@ -2785,6 +2925,7 @@ _timer_result() {
 
 _timer_exists() {
 	local dir="" unit=""
+	_valid_profile_name "${1}" || return 1
 	dir="$(_timer_unit_dir)"
 	unit="$(_timer_unit "${1}")"
 	[[ -f "${dir}/${unit}" ]]
@@ -2815,7 +2956,7 @@ _notify() {
 	local title="${1}" body="${2}"
 	((NOTIFY_ENABLED == 1)) || return 0
 	if command -v notify-send >/dev/null 2>&1; then
-		notify-send --app-name="${SCRIPTNAME}" --urgency=normal \
+		timeout 5 notify-send --app-name="${SCRIPTNAME}" --urgency=normal \
 			--icon=dialog-information "${title}" "${body}" 2>/dev/null || true
 		return 0
 	fi
@@ -2824,6 +2965,7 @@ _notify() {
 }
 
 _pending_file() {
+	_valid_profile_name "${1}" || return 1
 	printf '%s/%s' "${PENDING_DIR}" "${1}"
 }
 
@@ -2835,7 +2977,7 @@ _pending_has() {
 
 _pending_clear() {
 	local file=""
-	file="$(_pending_file "${1}")"
+	file="$(_pending_file "${1}")" || return 0
 	if [[ -e ${file} ]]; then
 		rm -f -- "${file}" 2>/dev/null && _log "attente d'extinction levée : ${1}"
 	fi
@@ -2843,11 +2985,13 @@ _pending_clear() {
 }
 
 _pending_list() {
-	local file=""
+	local file="" name=""
 	[[ -d ${PENDING_DIR} ]] || return 0
 	for file in "${PENDING_DIR}"/*; do
 		[[ -f ${file} ]] || continue
-		printf '%s\n' "${file##*/}"
+		name="${file##*/}"
+		_valid_profile_name "${name}" || continue
+		printf '%s\n' "${name}"
 	done | sort || true
 }
 
@@ -2856,7 +3000,7 @@ _pending_add() {
 	local name="${1}" reason="${2}" file="" tmp="" state=""
 	((DRY_RUN == 1)) && return 0
 	_timer_extinction "${name}" || return 0
-	file="$(_pending_file "${name}")"
+	file="$(_pending_file "${name}")" || return 0
 	[[ -f ${file} ]] && return 0
 	state="${PENDING_DIR%/*}"
 	if ! mkdir -p -- "${PENDING_DIR}" 2>/dev/null; then
@@ -2907,7 +3051,7 @@ timer_add() {
 	local name="${1:-}" freq="${2:-}" a3="${3:-}" a4="${4:-}"
 	local time="" day="" dayfr="" dir="" path="" unit="" cfg="" rc=0 ext=0
 	name="${name^^}"
-	if ! _known_profile "${name}"; then
+	if ! _valid_profile_name "${name}" || ! _known_profile "${name}"; then
 		_ERR "profil inconnu : ${name} (voir show)"
 		return 2
 	fi
@@ -3003,8 +3147,8 @@ timer_add() {
 timer_remove() {
 	local name="${1:-}" dir="" path="" unit="" rc=0
 	name="${name^^}"
-	if [[ -z ${name} ]]; then
-		_ERR "nom de profil manquant"
+	if ! _valid_profile_name "${name}"; then
+		_ERR "nom de profil invalide : ${name:-absent}"
 		return 2
 	fi
 	if ! _timer_exists "${name}"; then
@@ -3052,6 +3196,10 @@ timer_remove() {
 timer_run() {
 	local name="${1:-}" svc="" out=""
 	name="${name^^}"
+	if ! _valid_profile_name "${name}"; then
+		_ERR "nom de profil invalide : ${name:-absent}"
+		return 2
+	fi
 	if ! _timer_exists "${name}"; then
 		_ERR "aucune planification pour ${name}"
 		return 2
@@ -3082,6 +3230,11 @@ timer_list() {
 	if ! compgen -G "${dir}/${SCRIPTNAME}@*.timer" >/dev/null; then
 		if ((PORCELAIN == 0)); then
 			_INFO "aucune sauvegarde automatique"
+			local -a attente0=()
+			mapfile -t attente0 < <(_pending_list || true)
+			if ((${#attente0[@]} > 0)); then
+				_INFO "en attente d'extinction : ${attente0[*]}"
+			fi
 		fi
 		return 0
 	fi
@@ -3201,8 +3354,10 @@ timer_list() {
 
 	# Signale un template obsolète (chemin du script ou mode strict absent).
 	file="${dir}/${SCRIPTNAME}@.service"
+	local selfq=""
+	selfq="$(_systemd_quote "${SELF_PATH}")" || selfq="${SELF_PATH//%/%%}"
 	if [[ -f ${file} ]]; then
-		if ! grep -qF "${SELF_PATH//%/%%}" "${file}" 2>/dev/null; then
+		if ! grep -qF "${selfq}" "${file}" 2>/dev/null; then
 			_WARN "le service pointe vers un autre chemin que ${SELF_PATH} — relance ${SCRIPTNAME} timer-sync"
 		fi
 		if ! grep -qF "PRIVATE_BACKUP_STRICT_SKIP=1" "${file}" 2>/dev/null; then
@@ -3231,7 +3386,7 @@ backup_pending() {
 		_INFO "mode extinction : ${#noms[@]} profil(s) en attente"
 	fi
 	for name in "${noms[@]}"; do
-		if ! _known_profile "${name}"; then
+		if ! _valid_profile_name "${name}" || ! _known_profile "${name}"; then
 			_WARN "${name} : profil absent de la configuration — attente levée"
 			_pending_clear "${name}"
 			continue
@@ -3274,17 +3429,29 @@ backup_pending() {
 
 # Contenu du service système exécuté à l'extinction.
 _shutdown_unit_lines() {
-	local user="" group="" uid="" home="" cfg="" script="" nas="" mount_unit="" after=""
+	local user="" group="" uid="" home="" state="" cfg="" script="" nas="" mount_unit="" after=""
+	local env_home="" env_runtime="" env_state=""
 	user="$(_timer_user)"
 	group="$(id -gn "${user}" 2>/dev/null)" || group="${user}"
 	uid="$(id -u "${user}" 2>/dev/null)" || uid="${UID}"
 	home="${HOME}"
-	script="${SELF_PATH//%/%%}"
+	state="${XDG_STATE_HOME:-${home}/.local/state}"
+	[[ ${state} == /* ]] || state="${home}/.local/state"
+	script="$(_systemd_quote "${SELF_PATH}")" || {
+		_ERR "chemin du script invalide pour l'unité d'extinction"
+		return 1
+	}
 	if [[ -n ${CFG_FILE} ]]; then
 		cfg="$(readlink -f -- "${CFG_FILE}" 2>/dev/null)" || cfg="${CFG_FILE}"
-		cfg="${cfg//%/%%}"
+		cfg="$(_systemd_quote "${cfg}")" || {
+			_ERR "chemin de configuration invalide pour l'unité d'extinction"
+			return 1
+		}
 	fi
 	nas="${NAS}"
+	env_home="$(_systemd_quote "HOME=${home}")" || return 1
+	env_runtime="$(_systemd_quote "XDG_RUNTIME_DIR=/run/user/${uid}")" || return 1
+	env_state="$(_systemd_quote "XDG_STATE_HOME=${state}")" || return 1
 	mount_unit=""
 	if [[ -n ${nas} ]] && command -v systemd-escape >/dev/null 2>&1; then
 		mount_unit="$(systemd-escape -p --suffix=mount "${nas}" 2>/dev/null)" || mount_unit=""
@@ -3303,12 +3470,12 @@ _shutdown_unit_lines() {
 		"Type=oneshot" \
 		"User=${user}" \
 		"Group=${group}" \
-		"Environment=HOME=${home}" \
-		"Environment=XDG_RUNTIME_DIR=/run/user/${uid}" \
-		"Environment=XDG_STATE_HOME=${home}/.local/state" \
+		"Environment=${env_home}" \
+		"Environment=${env_runtime}" \
+		"Environment=${env_state}" \
 		"Environment=PRIVATE_BACKUP_LOCK_WAIT=7200" \
 		"Environment=PRIVATE_BACKUP_STRICT_SKIP=1" \
-		"ExecStart=\"${script}\"${cfg:+ --config \"${cfg}\"} backup-pending --shutdown" \
+		"ExecStart=${script}${cfg:+ --config ${cfg}} backup-pending --shutdown" \
 		"TimeoutStartSec=infinity" \
 		"Nice=10" \
 		"IOSchedulingClass=idle" \
@@ -3500,7 +3667,9 @@ timer_sync() {
 	fi
 	if _shutdown_unit_installed; then
 		syspath="$(_shutdown_unit_path)"
-		if ! grep -qF "${SELF_PATH//%/%%}" "${syspath}" 2>/dev/null; then
+		local selfq=""
+		selfq="$(_systemd_quote "${SELF_PATH}")" || selfq="${SELF_PATH//%/%%}"
+		if ! grep -qF "${selfq}" "${syspath}" 2>/dev/null; then
 			_WARN "le service d'extinction pointe vers un autre chemin — relance ${SCRIPTNAME} timer-shutdown-enable"
 		fi
 	fi
@@ -3553,16 +3722,17 @@ profile_add() {
 	local name="${1:-}" src="${2:-}" cmd="${3:-}" excl="${4:-}" exists=0
 
 	name="${name^^}"
-	if [[ ! ${name} =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+	if ! _valid_profile_name "${name}"; then
 		_ERR "nom de profil invalide : ${name} (lettres A-Z, chiffres, _, commence par une lettre)"
 		return 2
 	fi
-	if [[ -z ${src} ]]; then
-		_ERR "dossier source manquant (relatif à \$HOME)"
+	if ! _source_path_ok "${src}"; then
+		_ERR "dossier invalide : ${src:-absent} (relatif à \$HOME, sans « .. » ni « . »)"
 		return 2
 	fi
-	if [[ ${src} == /* ]]; then
-		_ERR "le dossier doit être relatif à \$HOME (reçu : ${src})"
+	if [[ ${cmd} == *$'\n'* ]] || [[ ${cmd} == *$'\r'* ]] ||
+		[[ ${excl} == *$'\n'* ]] || [[ ${excl} == *$'\r'* ]]; then
+		_ERR "binaire ou exclusions sur plusieurs lignes — refuse"
 		return 2
 	fi
 	[[ -e "${HOME}/${src}" ]] || _WARN "${HOME}/${src} n'existe pas encore"
@@ -3865,6 +4035,9 @@ delete_old() {
 		return "${rc}"
 	fi
 
+	if ((PURGE_ORPHANS == 1)) && ((orphan_count == 0)); then
+		_INFO "aucun profil orphelin ; seules les archives excédentaires sont proposées"
+	fi
 	printf '\n%bSuppression proposée%b (rétention : %d par groupe)\n' "${C_BOLD}" "${C_RESET}" "${KEEP}"
 	local total_bytes=0 fsize size_h name
 	for i in "${!del_paths[@]}"; do
@@ -3991,6 +4164,10 @@ main() {
 
 	if ((SHUTDOWN_RUN == 1)) && [[ ${cmd} != "backup-pending" ]]; then
 		_ERR "--shutdown ne s'utilise qu'avec backup-pending"
+		return 2
+	fi
+	if ((EXTINCTION_SET == 1)) && [[ ${cmd} != "timer-add" ]]; then
+		_ERR "--extinction/--no-extinction ne s'utilisent qu'avec timer-add"
 		return 2
 	fi
 
@@ -4179,9 +4356,13 @@ main() {
 		rc=0
 		;;
 	config-check)
-		_INFO "configuration valide : ${CFG_FILE}"
-		_config_conflicts
-		rc=0
+		if _config_paths_check; then
+			_INFO "configuration valide : ${CFG_FILE}"
+			_config_conflicts
+			rc=0
+		else
+			rc=2
+		fi
 		;;
 	show)
 		show
