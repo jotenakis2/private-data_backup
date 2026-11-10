@@ -43,6 +43,11 @@ readonly ICON_CONFIG=$'\uf013'
 readonly ICON_CLOCK=$'\uf017'
 readonly ICON_PLAY=$'\uf04b'
 readonly ICON_LOCK=$'\uf023'
+readonly ICON_VERIFY=$'\uf058'
+readonly ICON_KEY=$'\uf084'
+readonly ICON_HISTORY=$'\uf1da'
+readonly ICON_BAN=$'\uf05e'
+readonly ICON_HELP=$'\uf059'
 readonly ICON_SYNC=$'\uf021'
 
 # Profils (`show --porcelain`).
@@ -1064,12 +1069,12 @@ _screen_archives() {
 
 		action="$(gum choose --header "${header}" --cursor "❯ " \
 			"${ICON_EYE}  Voir les archives" \
-			"Restaurer une version" \
-			"Vérifier une archive" \
-			"Supprimer des archives" \
-			"Chiffrer les archives en clair" \
-			"Appliquer la politique de rétention" \
-			"Purger les profils orphelins" \
+			"${ICON_RESTORE}  Restaurer une version" \
+			"${ICON_VERIFY}  Vérifier une archive" \
+			"${ICON_TRASH}  Supprimer des archives" \
+			"${ICON_KEY}  Chiffrer les archives en clair" \
+			"${ICON_HISTORY}  Appliquer la politique de rétention" \
+			"${ICON_BAN}  Purger les profils orphelins" \
 			"Retour")" || return 0
 		case "${action}" in
 		*Voir*)
@@ -1279,7 +1284,7 @@ _screen_profiles() {
 # ÉCRAN : DESCRIPTION
 # =============================================================================
 
-_screen_about() {
+_screen_help() {
 	_clear
 	local cfg="" nas="" sub="" storage=""
 
@@ -1528,23 +1533,23 @@ _menu() {
 	_clear
 	choice="$(gum choose --header "Private data backup v${APP_VER}" \
 		--cursor "❯ " \
-		"${ICON_INFO}  Description" \
 		"${ICON_SAVE}  Sauvegarder" \
 		"${ICON_RESTORE}  Restaurer" \
 		"${ICON_ARCHIVE}  Archives" \
 		"${ICON_USERS}  Profils" \
 		"${ICON_CLOCK}  Planification" \
 		"${ICON_CONFIG}  Configuration" \
+		"${ICON_HELP}  Aide" \
 		"${ICON_QUIT}  Quitter")" || return 1
 	# Correspondance par mot-clé : les icônes peuvent changer sans casser le menu.
 	case "${choice}" in
-	*Description*) _screen_about ;;
 	*Sauvegarder*) _screen_backup ;;
 	*Restaurer*) _screen_restore ;;
 	*Archives*) _screen_archives ;;
 	*Profils*) _screen_profiles ;;
 	*Planification*) _screen_timers ;;
 	*Configuration*) _screen_config ;;
+	*Aide*) _screen_help ;;
 	*) return 1 ;;
 	esac
 	return 0
@@ -1572,7 +1577,7 @@ main() {
 		printf '  %-16s %s\n' "Profils"       "ajouter, modifier, retirer, adopter les orphelins, conflits"
 		printf '  %-16s %s\n' "Planification" "timers systemd --user, mode extinction, attentes"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"
-		printf '  %-16s %s\n' "Description"   "présentation de l'outil"
+		printf '  %-16s %s\n' "Aide"          "présentation de l'outil"
 		printf '\nSécurité : vérification, instantanés, confirmations et verrou\n'
 		printf 'restent gérés par le script CLI.\n'
 		printf '\nDépendances : gum, awk, et private-data_backup.sh (même dossier).\n\n'

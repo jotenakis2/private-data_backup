@@ -74,7 +74,7 @@ private-data_backup.sh help | --version
 Interface texte :
 
 ```sh
-private-data_backup-tui.sh      # Description / Sauvegarder / Restaurer / Archives / Profils / Planification / Configuration
+private-data_backup-tui.sh      # Sauvegarder / Restaurer / Archives / Profils / Planification / Configuration / Aide
 ```
 
 Codes de sortie : `0` succès, `1` échec, `2` usage ou configuration invalide, `3` opération annulée.
