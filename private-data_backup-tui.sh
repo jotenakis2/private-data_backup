@@ -304,11 +304,20 @@ _error_text() {
 # =============================================================================
 
 _profile_header() {
-	printf '%-*s %-*s %-*s %s' \
+	printf '%-*s │ %-*s │ %-*s │ %s' \
 		"${P_NAME_W}" "PROFIL" \
 		"${P_SRC_W}" "DOSSIER" \
 		"${P_CMD_W}" "BINAIRE" \
 		"DERNIÈRE ARCHIVE"
+}
+
+_profile_rule() {
+	local a="" b="" c="" d=""
+	a="$(_dash "${P_NAME_W}")"
+	b="$(_dash "${P_SRC_W}")"
+	c="$(_dash "${P_CMD_W}")"
+	d="$(_dash 15)"
+	printf '%s─┼─%s─┼─%s─┼─%s' "${a}" "${b}" "${c}" "${d}"
 }
 
 _label() {
@@ -318,11 +327,11 @@ _label() {
 	if [[ -n ${P_ARCH[${i}]} ]]; then
 		when="$(_fmt_dt "${P_DATE[${i}]}")"
 		size="$(_human "${P_SIZE[${i}]}")"
-		line="$(printf '%-*s %-*s %-*s %s  (%s)' \
+		line="$(printf '%-*s │ %-*s │ %-*s │ %s  (%s)' \
 			"${P_NAME_W}" "${P_NAME[${i}]}" "${P_SRC_W}" "${P_SRC[${i}]}" \
 			"${P_CMD_W}" "${cmd}" "${when}" "${size}")"
 	else
-		line="$(printf '%-*s %-*s %-*s %s' \
+		line="$(printf '%-*s │ %-*s │ %-*s │ %s' \
 			"${P_NAME_W}" "${P_NAME[${i}]}" "${P_SRC_W}" "${P_SRC[${i}]}" \
 			"${P_CMD_W}" "${cmd}" "aucune archive")"
 	fi
@@ -404,8 +413,16 @@ _load_timers() {
 	return 0
 }
 
+_dash() {
+	local n="${1:-0}" i="" out=""
+	for ((i = 0; i < n; i++)); do
+		out+="─"
+	done
+	printf '%s' "${out}"
+}
+
 _timer_header() {
-	printf '%-*s %-*s %-*s %-*s %s' \
+	printf '%-*s │ %-*s │ %-*s │ %-*s │ %s' \
 		"${T_NAME_W}" "PROFIL" \
 		"${T_FREQ_W}" "FRÉQUENCE" \
 		"${T_NEXT_W}" "PROCHAINE EXÉCUTION" \
@@ -413,11 +430,21 @@ _timer_header() {
 		"DERNIER RÉSULTAT"
 }
 
+_timer_rule() {
+	local a="" b="" c="" d="" e=""
+	a="$(_dash "${T_NAME_W}")"
+	b="$(_dash "${T_FREQ_W}")"
+	c="$(_dash "${T_NEXT_W}")"
+	d="$(_dash "${T_EXT_W}")"
+	e="$(_dash 15)"
+	printf '%s─┼─%s─┼─%s─┼─%s─┼─%s' "${a}" "${b}" "${c}" "${d}" "${e}"
+}
+
 _timer_label() {
 	local i="${1}" ext=""
 	ext="${T_EXT[${i}]:-non}"
 	[[ ${ext} == "oui" ]] || ext="non"
-	printf '%-*s %-*s %-*s %-*s %s' \
+	printf '%-*s │ %-*s │ %-*s │ %-*s │ %s' \
 		"${T_NAME_W}" "${T_NAME[${i}]}" \
 		"${T_FREQ_W}" "${T_FREQ[${i}]} ${T_WHEN[${i}]}" \
 		"${T_NEXT_W}" "${T_NEXT[${i}]}" \
@@ -642,7 +669,7 @@ _timer_linger() {
 }
 
 _screen_timers() {
-	local action="" count=0 linger="" cc="" i="" header=""
+	local action="" count=0 linger="" cc="" i="" header="" rule=""
 	local -a labels=()
 	while true; do
 		_clear
@@ -657,8 +684,9 @@ _screen_timers() {
 				labels+=("$(_timer_label "${i}")")
 			done
 			header="$(_timer_header)"
+			rule="$(_timer_rule)"
 			gum style --border rounded --padding "0 2" \
-				"Sauvegardes automatiques (${cc})" "" "${header}" "${labels[@]}"
+				"Sauvegardes automatiques (${cc})" "" "${header}" "${rule}" "${labels[@]}"
 		else
 			gum style --border rounded --padding "0 2" --foreground 3 \
 				"${ICON_EMPTY}  Aucune sauvegarde automatique."
@@ -1198,7 +1226,7 @@ _profile_remove() {
 _screen_profiles() {
 	_clear
 	local -a labels=()
-	local i action header=""
+	local i action header="" rule=""
 
 	for i in "${!P_NAME[@]}"; do
 		labels+=("$(_label "${i}")")
@@ -1209,7 +1237,8 @@ _screen_profiles() {
 		return 0
 	fi
 	header="$(_profile_header)"
-	gum style --border rounded --padding "0 2" "Profils configurés" "" "${header}" "${labels[@]}"
+	rule="$(_profile_rule)"
+	gum style --border rounded --padding "0 2" "Profils configurés" "" "${header}" "${rule}" "${labels[@]}"
 
 	action="$(gum choose --header "${ICON_USERS}  Profils — que faire ?" --cursor "❯ " \
 		"${ICON_PLUS}  Ajouter un profil" \

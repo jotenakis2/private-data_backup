@@ -2734,12 +2734,18 @@ _timer_state() {
 }
 
 _timer_next() {
-	local unit="${1}" out=""
+	local unit="${1}" out="" short=""
 	out="$("${SYSTEMCTL_BIN}" --user show -p NextElapseUSecRealtime --value "${unit}" 2>/dev/null)" || out=""
 	case "${out}" in
-	"" | n/a | 0) printf '%s' "-" ;;
-	*) printf '%s' "${out}" ;;
+	"" | n/a | 0)
+		printf '%s' "-"
+		return 0
+		;;
+	*) ;;
 	esac
+	# Format compact et stable (systemd renvoie une date localisée longue).
+	short="$(date -d "${out}" '+%Y-%m-%d %H:%M' 2>/dev/null)" || short="${out}"
+	printf '%s' "${short}"
 }
 
 _timer_result() {
