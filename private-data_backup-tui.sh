@@ -1196,6 +1196,8 @@ _screen_archives() {
 			"${ICON_HISTORY}  Appliquer la politique de rétention" \
 			"${ICON_BAN}  Purger les profils orphelins" \
 			"Retour")" || return 0
+		# Les libellés commencent par une icône : chaque motif doit donc
+		# commencer par « * », sinon l'action retombe silencieusement.
 		case "${action}" in
 		*Voir*)
 			printf '\n'
@@ -1203,12 +1205,12 @@ _screen_archives() {
 			# En quittant le pager, on revient au menu : ses possibilités
 			# sont réaffichées.
 			;;
-		Restaurer*) _archives_restore ;;
-		Vérifier*) _archives_verify ;;
-		Supprimer*) _archives_delete ;;
-		Chiffrer*) _archives_encrypt ;;
-		Appliquer*) _archives_retention ;;
-		Purger*) _archives_purge ;;
+		*Restaurer*) _archives_restore ;;
+		*Vérifier*) _archives_verify ;;
+		*Supprimer*) _archives_delete ;;
+		*Chiffrer*) _archives_encrypt ;;
+		*Appliquer*) _archives_retention ;;
+		*Purger*) _archives_purge ;;
 		*) return 0 ;;
 		esac
 	done
@@ -1653,12 +1655,12 @@ _screen_config() {
 			"Délai NFS" \
 			"Retour")" || return 0
 		case "${action}" in
-		Destination*) _config_destination ;;
-		Rétention*) _config_retention ;;
-		Instantanés*) _config_snapshot ;;
-		Chiffrement*) _config_encrypt ;;
-		Journalisation*) _config_logging ;;
-		Délai*) _config_timeout ;;
+		*Destination*) _config_destination ;;
+		*Rétention*) _config_retention ;;
+		*Instantanés*) _config_snapshot ;;
+		*Chiffrement*) _config_encrypt ;;
+		*Journalisation*) _config_logging ;;
+		*Délai*) _config_timeout ;;
 		*) return 0 ;;
 		esac
 	done
