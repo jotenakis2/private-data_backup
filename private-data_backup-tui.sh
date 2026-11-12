@@ -61,10 +61,11 @@ P_CMD_W=12
 declare -a A_GROUP=() A_DATE=() A_SIZE=() A_PATH=()
 
 # Sauvegardes automatiques (`timer-list --porcelain`).
-declare -a T_NAME=() T_FREQ=() T_WHEN=() T_NEXT=() T_STATE=() T_RESULT=() T_EXT=()
+declare -a T_NAME=() T_FREQ=() T_WHEN=() T_NEXT=() T_LAST=() T_STATE=() T_RESULT=() T_EXT=()
 T_NAME_W=6
 T_FREQ_W=12
 T_NEXT_W=19
+T_LAST_W=16
 T_EXT_W=10
 
 # Sélections courantes.
@@ -407,11 +408,16 @@ _pick_archive() {
 # =============================================================================
 
 _load_timers() {
-	local out="" line="" f_name="" f_freq="" f_when="" f_next="" f_state="" f_result="" f_ext="" label=""
-	T_NAME=(); T_FREQ=(); T_WHEN=(); T_NEXT=(); T_STATE=(); T_RESULT=(); T_EXT=()
+	local out="" line="" f_name="" f_freq="" f_when="" f_next="" f_last="" f_state="" f_result="" f_ext="" label=""
+	# Les profils fournissent la date de la dernière archive (dernier succès).
+	if ((${#P_NAME[@]} == 0)); then
+		_load >/dev/null 2>&1 || true
+	fi
+	T_NAME=(); T_FREQ=(); T_WHEN=(); T_NEXT=(); T_LAST=(); T_STATE=(); T_RESULT=(); T_EXT=()
 	T_NAME_W=6
 	T_FREQ_W=12
 	T_NEXT_W=19
+	T_LAST_W=16
 	T_EXT_W=10
 	if ! out="$("${CLI}" timer-list --porcelain 2>/dev/null)"; then
 		return 1
@@ -424,6 +430,8 @@ _load_timers() {
 		T_FREQ+=("${f_freq}")
 		T_WHEN+=("${f_when}")
 		T_NEXT+=("${f_next}")
+		f_last="$(_timer_last_success "${f_name}")"
+		T_LAST+=("${f_last}")
 		T_STATE+=("${f_state}")
 		T_RESULT+=("${f_result}")
 		T_EXT+=("${f_ext}")
@@ -431,6 +439,7 @@ _load_timers() {
 		label="${f_freq} ${f_when}"
 		((${#label} > T_FREQ_W)) && T_FREQ_W=${#label}
 		((${#f_next} > T_NEXT_W)) && T_NEXT_W=${#f_next}
+		((${#f_last} > T_LAST_W)) && T_LAST_W=${#f_last}
 		((${#f_ext} > T_EXT_W)) && T_EXT_W=${#f_ext}
 	done <<<"${out}"
 	return 0
@@ -454,6 +463,22 @@ _dash() {
 	printf '%s' "${out}"
 }
 
+# Dernière sauvegarde réussie : date de l'archive la plus récente du profil.
+_timer_last_success() {
+	local name="${1}" i=""
+	for i in "${!P_NAME[@]}"; do
+		if [[ ${P_NAME[${i}]} == "${name}" ]]; then
+			if [[ -n ${P_ARCH[${i}]} ]]; then
+				_fmt_dt "${P_DATE[${i}]}"
+			else
+				printf '%s' "-"
+			fi
+			return 0
+		fi
+	done
+	printf '%s' "-"
+}
+
 _timer_header() {
 	_pad "PROFIL" "${T_NAME_W}"
 	printf ' │ '
@@ -461,18 +486,21 @@ _timer_header() {
 	printf ' │ '
 	_pad "PROCHAINE EXÉCUTION" "${T_NEXT_W}"
 	printf ' │ '
+	_pad "DERNIER SUCCÈS" "${T_LAST_W}"
+	printf ' │ '
 	_pad "EXTINCTION" "${T_EXT_W}"
 	printf ' │ %s' "DERNIER RÉSULTAT"
 }
 
 _timer_rule() {
-	local a="" b="" c="" d="" e=""
+	local a="" b="" c="" d="" e="" f=""
 	a="$(_dash "${T_NAME_W}")"
 	b="$(_dash "${T_FREQ_W}")"
 	c="$(_dash "${T_NEXT_W}")"
-	d="$(_dash "${T_EXT_W}")"
-	e="$(_dash 16)"
-	printf '%s─┼─%s─┼─%s─┼─%s─┼─%s' "${a}" "${b}" "${c}" "${d}" "${e}"
+	d="$(_dash "${T_LAST_W}")"
+	e="$(_dash "${T_EXT_W}")"
+	f="$(_dash 16)"
+	printf '%s─┼─%s─┼─%s─┼─%s─┼─%s─┼─%s' "${a}" "${b}" "${c}" "${d}" "${e}" "${f}"
 }
 
 _timer_label() {
@@ -484,6 +512,8 @@ _timer_label() {
 	_pad "${T_FREQ[${i}]} ${T_WHEN[${i}]}" "${T_FREQ_W}"
 	printf ' │ '
 	_pad "${T_NEXT[${i}]}" "${T_NEXT_W}"
+	printf ' │ '
+	_pad "${T_LAST[${i}]:--}" "${T_LAST_W}"
 	printf ' │ '
 	_pad "${ext}" "${T_EXT_W}"
 	printf ' │ %s' "${T_RESULT[${i}]}"
@@ -500,7 +530,7 @@ _timer_pick() {
 	for i in "${!T_NAME[@]}"; do
 		labels+=("$(_timer_label "${i}")")
 	done
-	pick="$(gum choose --header "${ICON_CLOCK}  Choisir — PROFIL · FRÉQUENCE · PROCHAINE · EXTINCTION · RÉSULTAT" --cursor "❯ " "${labels[@]}")" || {
+	pick="$(gum choose --header "${ICON_CLOCK}  Choisir — PROFIL · FRÉQUENCE · PROCHAINE · DERNIER SUCCÈS · EXTINCTION · RÉSULTAT" --cursor "❯ " "${labels[@]}")" || {
 		_notice "Sélection annulée" "Aucune planification choisie."
 		return 1
 	}

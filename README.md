@@ -155,7 +155,8 @@ utilise `PartOf=graphical-session.target` et `TimeoutStopSec=infinity` ; si une
 extinction l'interrompt, le service système reprend l'attente restante.
 `timer-list` affiche les colonnes `PROCHAINE EXÉCUTION`, `EXTINCTION`
 (`oui`/`non`) et `DERNIER RÉSULTAT`, les profils en attente et l'état des
-services. Sans le mode, le comportement reste inchangé (profil ignoré,
+services. La TUI ajoute `DERNIER SUCCÈS` (date de la dernière archive réussie
+du profil), placée juste après la prochaine exécution. Sans le mode, le comportement reste inchangé (profil ignoré,
 prochaine échéance).
 
 ```sh
