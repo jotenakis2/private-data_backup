@@ -333,12 +333,16 @@ profils et la configuration.
 .B private-data_backup-tui.sh
 fournit une interface interactive construite sur
 .BR gum .
-Elle couvre : sauvegarder des profils (sélection multiple), restaurer une
-archive avec choix de l'instantané, agir sur les archives (voir, restaurer une
-version précise, vérifier, supprimer, rétention, purge des orphelins),
-gérer les profils (ajout, modification, retrait) et la configuration
-(destination, rétention, instantanés, chiffrement, journalisation), et
-afficher une description de l'outil.
+Elle couvre : sauvegarder des profils, restaurer une archive avec choix de
+l'instantané, agir sur les archives (voir, restaurer une version précise,
+vérifier, supprimer, rétention, purge des orphelins), gérer les profils (ajout,
+modification, retrait) et la configuration (destination, rétention, instantanés,
+chiffrement, journalisation), et afficher une description de l'outil.
+.PP
+Dans l'écran \fBSauvegarder\fR, \fBEntrée\fR lance directement la sauvegarde du
+profil surligné. Pour en sauvegarder plusieurs, choisir
+\fB« Cocher plusieurs profils… »\fR, cocher avec \fBx\fR puis valider avec
+\fBEntrée\fR.
 .PP
 Aucune logique n'y est dupliquée : vérification d'intégrité, instantanés,
 confirmations, verrou et codes de retour restent gérés par

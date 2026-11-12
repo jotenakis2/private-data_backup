@@ -77,6 +77,10 @@ Interface texte :
 private-data_backup-tui.sh      # Sauvegarder / Restaurer / Archives / Profils / Planification / Configuration / Aide
 ```
 
+Dans l'écran **Sauvegarder**, `Entrée` lance directement la sauvegarde du profil
+surligné. Pour en sauvegarder plusieurs, choisir « Cocher plusieurs profils… »,
+cocher avec `x` puis valider avec `Entrée`.
+
 Codes de sortie : `0` succès, `1` échec, `2` usage ou configuration invalide, `3` opération annulée.
 
 ## Sauvegardes automatiques

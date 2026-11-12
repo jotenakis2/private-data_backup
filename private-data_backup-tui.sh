@@ -819,10 +819,31 @@ _screen_timers() {
 # ÉCRANS : SAUVEGARDER / RESTAURER
 # =============================================================================
 
+_backup_names_from_pick() {
+	# Lit des libellés de profils (un par ligne) sur stdin ; écrit les noms
+	# correspondants (P_NAME) sur stdout, dans l'ordre de la liste affichée.
+	# La correspondance est exacte (libellé -> index -> P_NAME) pour rester
+	# robuste aux icônes, au padding et aux espaces.
+	local -n _labels_ref="${1}"
+	local -n _names_ref="${2}"
+	local line="" i=""
+	_names_ref=()
+	while IFS= read -r line; do
+		[[ -n ${line} ]] || continue
+		for i in "${!_labels_ref[@]}"; do
+			if [[ ${_labels_ref[${i}]} == "${line}" ]]; then
+				_names_ref+=("${P_NAME[${i}]}")
+				break
+			fi
+		done
+	done
+}
+
 _screen_backup() {
 	_clear
-	local -a labels=() args=()
-	local i pick line
+	local -a labels=() names=() menu=()
+	local i pick="" multi_pick=""
+	local multi_opt="${ICON_USERS}  Cocher plusieurs profils…"
 
 	for i in "${!P_NAME[@]}"; do
 		labels+=("$(_label "${i}")")
@@ -833,34 +854,47 @@ _screen_backup() {
 		return 0
 	fi
 
-	pick="$(gum choose --no-limit --height 15 \
-		--header "${ICON_SAVE}  Sauvegarder — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" \
-		--cursor "❯ " "${labels[@]}")" || {
-		_notice "Sauvegarde annulée" "Aucun profil sélectionné."
+	menu=("${labels[@]}" "${multi_opt}")
+	pick="$(gum choose --height 15 \
+		--header "${ICON_SAVE}  Sauvegarder — Entrée pour valider le profil surligné" \
+		--cursor "❯ " "${menu[@]}")" || {
+		_notice "Sauvegarde annulée" "Aucune donnée archivée."
 		return 0
 	}
 	[[ -z ${pick} ]] && {
-		_notice "Sauvegarde annulée" "Aucun profil sélectionné."
+		_notice "Sauvegarde annulée" "Aucune donnée archivée."
 		return 0
 	}
 
-	while IFS= read -r line; do
-		[[ -n ${line} ]] || continue
-		args+=("${line%% *}")
-	done <<<"${pick}"
-	((${#args[@]} == 0)) && {
-		_notice "Sauvegarde annulée" "Aucun profil sélectionné."
+	if [[ ${pick} == "${multi_opt}" ]]; then
+		multi_pick="$(gum choose --no-limit --height 15 \
+			--header "${ICON_SAVE}  Sauvegarder — x pour cocher, Entrée pour valider" \
+			--cursor "❯ " "${labels[@]}")" || {
+			_notice "Sauvegarde annulée" "Aucune donnée archivée."
+			return 0
+		}
+		[[ -z ${multi_pick} ]] && {
+			_notice "Aucune sélection" "Aucune case cochée : utilise x pour cocher, puis Entrée pour valider."
+			return 0
+		}
+		_backup_names_from_pick labels names <<<"${multi_pick}"
+	else
+		_backup_names_from_pick labels names <<<"${pick}"
+	fi
+
+	((${#names[@]} == 0)) && {
+		_notice "Aucune sélection" "Aucune case cochée : utilise x pour cocher, puis Entrée pour valider."
 		return 0
 	}
 
 	gum confirm --affirmative "Sauvegarder" --negative "Annuler" \
-		"Sauvegarder : ${args[*]} ?" || {
+		"Sauvegarder : ${names[*]} ?" || {
 		_notice "Sauvegarde annulée" "Aucune donnée archivée."
 		return 0
 	}
 
 	printf '\n'
-	"${CLI}" backup "${args[@]}"
+	"${CLI}" backup "${names[@]}"
 	_pause
 	return 0
 }
@@ -884,7 +918,11 @@ _screen_restore() {
 
 	pick="$(gum choose --header "${ICON_RESTORE}  Restaurer — PROFIL · DOSSIER · BINAIRE · DERNIÈRE ARCHIVE" \
 		--cursor "❯ " "${labels[@]}")" || {
-		_notice "Restauration annulée" "Aucun profil sélectionné."
+		_notice "Restauration annulée" "Aucune donnée restaurée."
+		return 0
+	}
+	[[ -z ${pick} ]] && {
+		_notice "Aucune sélection" "Aucun profil choisi : sélectionne un profil, puis Entrée pour valider."
 		return 0
 	}
 	for j in "${!labels[@]}"; do
@@ -894,7 +932,7 @@ _screen_restore() {
 		fi
 	done
 	((pos < 0)) && {
-		_notice "Restauration annulée" "Aucun profil sélectionné."
+		_notice "Aucune sélection" "Aucun profil choisi : sélectionne un profil, puis Entrée pour valider."
 		return 0
 	}
 	i="${idx[${pos}]}"
@@ -1717,11 +1755,13 @@ main() {
 		printf '\nprivate-data_backup-tui %s — interface texte de private-data_backup\n' "${APP_VER}"
 		printf '\nUsage : private-data_backup-tui.sh [--help | --version]\n'
 		printf '\nÉcrans\n'
-		printf '  %-16s %s\n' "Sauvegarder"   "choisir des profils et lancer une sauvegarde"
+		printf '  %-16s %s\n' "Sauvegarder"   "Entrée pour sauvegarder le profil surligné ;"
+		printf '  %-16s %s\n' ""              "« Cocher plusieurs profils… » puis x pour cocher, Entrée"
+		printf '  %-16s %s\n' ""              "pour valider une sélection multiple"
 		printf '  %-16s %s\n' "Restaurer"     "restaurer la dernière archive, avec ou sans instantané"
 		printf '  %-16s %s\n' "Archives"      "voir, restaurer une version, vérifier, supprimer (x pour"
-		printf '  %-16s %s\n' ""              "cocher plusieurs archives), chiffrer les archives en clair,"
-		printf '  %-16s %s\n' ""              "rétention, purge des profils orphelins"
+		printf '  %-16s %s\n' ""              "cocher plusieurs archives, Entrée pour valider),"
+		printf '  %-16s %s\n' ""              "chiffrer les archives en clair, rétention, purge"
 		printf '  %-16s %s\n' "Profils"       "ajouter, modifier, retirer, adopter les orphelins, conflits"
 		printf '  %-16s %s\n' "Planification" "timers systemd --user, mode extinction, attentes"
 		printf '  %-16s %s\n' "Configuration" "destination, rétention, instantanés, chiffrement, journaux"

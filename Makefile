@@ -1,7 +1,8 @@
 # =============================================================================
 # private-data_backup — installation
 #
-#   make check        vérifie la syntaxe, shellcheck, la configuration et le manuel
+#   make check        vérifie la syntaxe, shellcheck, la configuration, le manuel et les tests
+#   make test         exécute les tests non interactifs (TUI)
 #   make install      installe les scripts et la configuration
 #   make reinstall    idem mais remplace la configuration existante
 #   make uninstall    retire les scripts (PURGE=1 pour aussi la configuration)
@@ -38,14 +39,15 @@ CONF      := private-data_backup.conf.example
 MANPAGE   := private-data_backup.1
 CONF_DEST := $(CONFDIR)/config
 
-.PHONY: all help check install install-scripts install-config install-man reinstall uninstall
+.PHONY: all help check test install install-scripts install-config install-man reinstall uninstall
 
 all: check
 
 help:
 	@printf '\n'
 	@printf 'private-data_backup — cibles disponibles\n\n'
-	@printf '  make check       syntaxe + shellcheck + validation de la configuration\n'
+	@printf '  make check       syntaxe + shellcheck + configuration + manuel + tests\n'
+	@printf '  make test        exécute les tests non interactifs (TUI)\n'
 	@printf '  make install     scripts dans %s, configuration dans %s, manuel dans %s\n' \
 		'$(DESTDIR)$(BINDIR)' '$(DESTDIR)$(CONFDIR)' '$(DESTDIR)$(MANDIR)/man1'
 	@printf '  make reinstall   comme install, en remplaçant la configuration\n'
@@ -66,7 +68,12 @@ check:
 	@printf '  manuel      %s\n' "$(MANPAGE)"
 	@out="$$(groff -Kutf8 -man -z -ww "$(MANPAGE)" 2>&1)" || exit 1; \
 	 if [ -n "$$out" ]; then printf '%s\n' "$$out"; exit 1; fi
+	@$(MAKE) --no-print-directory test
 	@printf '  OK\n'
+
+test:
+	@printf '  tests       tests/run.sh\n'
+	@TERM=xterm-256color ./tests/run.sh
 
 install: install-scripts install-config install-man
 
